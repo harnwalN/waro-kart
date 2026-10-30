@@ -48,5 +48,3 @@ Psst... stick around on the results screen. 👨‍🍳
 ---
 
 ## 🎃 Happy Halloween, everyone! 👻
-
-Thanks for all the hard work this year. Grab some candy and race your coworkers for bragging rights. Drive safe out there. 🍬🦇
