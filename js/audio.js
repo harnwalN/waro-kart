@@ -102,7 +102,14 @@
       tone(sfxBus, 'square', t, 0.1, 140, 60, 0.18);
     },
     estop: function (t) {
-      for (var i = 0; i < 4; i++) tone(sfxBus, 'pulse25', t + i * 0.09, 0.08, i & 1 ? 784 : 1175, 0, 0.16);
+      // "CALL EHS!" safety alarm: hi-lo two-tone siren (3 cycles, ~0.6 s total),
+      // each tone slightly swept like a warehouse beacon horn, plus a sub-octave body.
+      for (var i = 0; i < 6; i++) {
+        var hi = !(i & 1), t0 = t + i * 0.1;
+        var f = hi ? 988 : 740;
+        tone(sfxBus, 'square', t0, 0.095, f * 0.97, f, 0.13, 0.003);
+        tone(sfxBus, 'triangle', t0, 0.095, f / 2, f / 2, 0.22, 0.003);
+      }
     },
     pickup: function (t) {
       [72, 76, 79, 84, 88].forEach(function (n, i) { tone(sfxBus, 'pulse25', t + i * 0.04, 0.06, hz(n), 0, 0.17); });

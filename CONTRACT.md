@@ -144,3 +144,96 @@ AGV.game = {
 ```
 Key bindings: P1 = WASD + Space (item) + Left Shift (drift). P2 = Arrow keys + Enter (item) + Right Shift (drift).
 Menus: arrows/WASD + Enter/Space. Esc = pause/back. M = mute. Use `KeyboardEvent.code` and `preventDefault` on game keys.
+
+---
+
+# v2: chase-cam pseudo-3D view (replaces the top-down race view)
+
+The race view is now a **raycast pseudo-3D view from just behind the player's AGV**, in the style of early-90s
+"2.5D" games. The world stays the same 2D tile map with the same physics, AI and collision; only race rendering changes.
+The top-down `gfx.js` is still used for the title screen, menus, font, panels, item icons and the HUD minimap.
+`gfx.drawWorld`/`drawAGV` etc. are no longer used in races.
+
+New load order: `map.js`, `gfx.js`, `tex.js`, `view3d.js`, `audio.js`, `game.js`.
+
+## World-space 3D conventions
+- x,y are the same world px as before. z is height in world px, with z=0 at the floor.
+- `AGV.WALL_H = 96`: every solid tile is a wall column of this height, and the ceiling is a flat plane at z = WALL_H.
+  (CURB tiles are solid for physics but rendered as a yellow **floor** texture, i.e. as a low curb strip.)
+- `AGV.DOOR_H = 56`: door leaves (from `AGV.doorLeaves`) are thin boxes of this height.
+- Movers (`AGV.moverRect`) are boxes of height WALL_H.
+- AGV model size: platform 24 long x 16 wide x 6 tall (z 1..7, with wheels below); four white boxes, each about 11 x 7.5 x 9
+  (z 7..16), arranged 2x2 on top. A lidar puck sits at the front.
+- Chase camera (computed by game.js): about 44 px behind the racer, eye height `cam.z` about 30, looking along `cam.angle`.
+  Horizon row = `vh * 0.40` (+ `cam.pitch` px), so the camera looks slightly down at the AGV. Horizontal FOV about 66°.
+  game.js keeps the camera out of walls.
+
+## tex.js → `AGV.tex` (owner: TEX agent)
+Procedural pixel-art textures for the 3D view. A texture is `{ w, h, data }`, where `data` is a `Uint32Array(w*h)` of
+**ABGR little-endian pixels** (the same layout as `new Uint32Array(imageData.data.buffer)`), row-major. Alpha 0 means
+transparent (for sprites). Everything is built procedurally in code in `init()` (and cached lazily). Colors are taken from
+`AGV.gfx.PAL` / the photos.
+```js
+AGV.tex = {
+  init(),                                   // build everything; safe to call more than once
+  wall(tileId, tx, ty, face) -> texture,    // face: 0 = a face looking north or south (hit on a horizontal grid line), 1 = east or west.
+                                            // Size 32 x 96 (u across one tile face, v from top z=WALL_H down to the floor).
+                                            // WALL: white with a black base and yellow kick-curb at the bottom, the odd fire extinguisher,
+                                            //   a light strip near the top. WINDOW: wall with a dark glass window. DOCKDOOR: roll-up white
+                                            //   door with ribs and small windows. RACK: tall pallet racking with teal uprights, orange beams,
+                                            //   wire decks and brown/white cartons on 4-5 shelf levels (vary by tx,ty). ROOM/OUTSIDE: plain wall.
+  floorIndex: Uint16Array(W*H),             // per map tile: index into floorTextures (built in init from AGV.map)
+  floorTextures: [texture 16x16, ...],      // concrete variants, scuff, vinyl, tape, dockplate, curb (yellow top), ...
+  ceiling: texture 64x64,                   // dark ceiling with fluorescent light strips / ducts (photo p3, p7), tiled every 64 px
+  decal(runKey) -> { scale:2, w, h, data }, // run overlay at 2 world px per cell (w = W*8, h = H*8). data is Uint32 ABGR, 0 = none.
+                                            // Contains the dashed route guide line + chevrons in run.color, and the checkered finish rect.
+  sprite(name, frame) -> { tex, worldW, worldH, z },  // billboards; frame is optional (default 0). z = base height in world px.
+       // names: 'bollard','column','palletjack','bins','crates','cart','exitsign' (z ~ 64),'pickup' (4 frames, bobbing "?" pallet),
+       //        'drop_wrap','drop_peanuts','drop_box','ehs' (a yellow "CALL EHS!" sign / hazard beacon that floats over an AGV during E-STOP)
+  agv(color, boxes, view, lightRed) -> { tex, worldW, worldH, z:0 },
+       // pre-rendered AGV billboard (a small software-3D render of the model above, at a slight overhead camera angle of about 18°).
+       // view 0..15: the AGV's heading relative to the camera's line of sight to it, in 22.5° steps, positive = clockwise as seen
+       // from above in world coords. view 0 = we see its REAR (lidar puck facing away), 4 = its heading is 90° clockwise from the
+       // line of sight (we see its left flank, nose pointing to screen right), 8 = we see its FRONT.
+       // boxes 0..4. lightRed: status beacon red instead of green. Cached by key. Texture about 48x32.
+  boxFace(kind, face) -> texture             // kind 'door' (white leaf with steel kick plate, 16x56) | 'mover' (face 0 = long side racking,
+                                             // face 1 = grey end panel with a black control box), 32x96
+};
+```
+
+## view3d.js → `AGV.view3d` (owner: VIEW3D agent)
+```js
+AGV.view3d = {
+  init(),                       // after AGV.map and AGV.tex; allocates buffers
+  render(ctx, vx, vy, vw, vh, cam, scene)
+     // Draws one viewport at screen rect (vx,vy,vw,vh) of the 320x180 canvas using its own ImageData buffer + putImageData.
+     // cam   = { x, y, z, angle, pitch, fov }   (fov in radians, default ~1.15)
+     // scene = {
+     //   t, runKey,
+     //   racers:  [{ x, y, angle, color, boxes, estop, boost, finished, tag }],
+     //   pickups: [{ x, y }]           (only active ones),
+     //   drops:   [{ kind:'wrap'|'peanuts'|'box', x, y }],
+     //   doors:   [{ door, openFrac }],
+     //   movers:  [{ mover, rect }],
+     //   particles: [{ x, y, z, color, size }]
+     // }
+     // Returns nothing. Must not throw if AGV.tex is missing (use flat placeholder colors).
+  project(cam, vw, vh, x, y, z) -> { sx, sy, scale, depth } | null   // world -> viewport px (null if behind the camera);
+                                // used by game.js to place floating text (e.g. "CALL EHS!") over AGVs
+};
+```
+Rendering requirements:
+- Walls: DDA raycast per screen column against `AGV.isSolid` tiles, ignoring CURB (treated as floor), with perpendicular
+  distance correction and a texture u from the hit position.
+- Floor and ceiling casting per pixel row.
+- Thin dynamic boxes (door leaves, movers) intersected per column with ray-vs-AABB, drawn if nearer than the wall,
+  each with its own height.
+- Billboards (props from `AGV.map.props` that have a sprite, pickups, drops, racers, `ehs` signs over racers in E-STOP),
+  sorted far to near and clipped against a per-column depth buffer.
+- Distance shading/fog through lookup tables, so depth reads clearly.
+- The player's own AGV is just another billboard; the camera behind it naturally shows its rear.
+- Performance target: under 6 ms per frame for a 320x180 viewport, or two 160x180 viewports, in Chrome.
+
+## Naming change: E-STOP → "CALL EHS!"
+All player-facing text that said E-STOP now says **CALL EHS!** (EHS = Environment, Health & Safety). Internal
+field names (`estop`, `estopT`, sfx `'estop'`) stay unchanged.

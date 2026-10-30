@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AGV Rally tex preview</title>
+<style>
+  html, body { margin: 0; background: #2a2d33; color: #ccc; font: 12px monospace; }
+  canvas { display: block; image-rendering: pixelated; }
+  #err { color: #f66; white-space: pre; position: absolute; top: 0; left: 0; }
+</style>
+</head>
+<body>
+<!-- Dev-only texture sheet for js/tex.js. ?part=world (default) | agv  &s=scale -->
+<canvas id="c" width="1400" height="1800"></canvas>
+<div id="err"></div>
+<script>
+  window.onerror = function (m, s, l) { document.getElementById('err').textContent += m + ' @' + s + ':' + l + '\n'; };
+</script>
+<script src="../js/map.js"></script>
+<script src="../js/gfx.js"></script>
+<script src="../js/tex.js"></script>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var part = q.get('part') || 'world';
+  var cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  cv.width = window.innerWidth || 1400; cv.height = window.innerHeight || 1800;
+  var W = cv.width, H = cv.height;
+  var img = ctx.createImageData(W, H), buf = new Uint32Array(img.data.buffer);
+  buf.fill(0xff332d2a);
+  var labels = [];
+  var T = AGV.T, tex = AGV.tex.init(), map = AGV.map;
+
+  // Nearest-neighbour blit; transparent texels show a checkerboard.
+  function blit(t, x0, y0, s, sx, sy, sw, sh) {
+    sx = sx || 0; sy = sy || 0; sw = sw || t.w; sh = sh || t.h;
+    for (var y = 0; y < sh * s; y++) {
+      var Y = y0 + y; if (Y < 0 || Y >= H) continue;
+      var ty = sy + ((y / s) | 0);
+      for (var x = 0; x < sw * s; x++) {
+        var X = x0 + x; if (X < 0 || X >= W) continue;
+        var c = t.data[ty * t.w + sx + ((x / s) | 0)];
+        if (!(c >>> 24)) c = (((X >> 3) + (Y >> 3)) & 1) ? 0xff5a5048 : 0xff6a6058;
+        buf[Y * W + X] = c;
+      }
+    }
+  }
+  function label(s, x, y) { labels.push([s, x, y]); }
+
+  if (part === 'world') {
+    var S = +(q.get('s') || 3), x = 8, y = 16;
+    // walls: pick representative tiles straight from the map
+    var picks = [], seen = {};
+    function want(name, tx, ty, f) { picks.push([name, tex.wall(map.at(tx, ty), tx, ty, f)]); }
+    want('hall', 30, 79, 0); want('hall+ext', 45, 79, 0);
+    want('window', 55, 88, 0); want('dock', 2, 98, 1);
+    want('dockdoor', 2, 93, 1); want('dockdoor', 2, 94, 1); want('dockdoor', 2, 95, 1);
+    want('decon', 102, 92, 1); want('rack', 127, 30, 1); want('rack', 127, 33, 1); want('rack end', 128, 68, 0);
+    want('rack end', 127, 68, 0); want('stock', 130, 2, 0);
+    picks.push(['mover0', tex.boxFace('mover', 0)], ['mover1', tex.boxFace('mover', 1)]);
+    picks.forEach(function (p) { blit(p[1], x, y, S); label(p[0], x, y - 4); x += p[1].w * S + 6; });
+    picks.push(['door', tex.boxFace('door', 0)]);
+    x += 0;
+    y += 96 * S + 22; x = 8;
+    // a few more random walls
+    var more = [];
+    for (var ty = 0; ty < map.H && more.length < 14; ty += 3) for (var tx = 0; tx < map.W && more.length < 14; tx += 7) {
+      var id = map.at(tx, ty);
+      if (id !== T.WALL) continue;
+      for (var f = 0; f < 2; f++) {
+        var w = tex.wall(id, tx, ty, f);
+        if (!seen[w.__k = w.__k || Math.random()] && more.length < 14) { seen[w.__k] = 1; more.push(w); }
+      }
+    }
+    blit(tex.boxFace('door', 0), x, y, S); blit(tex.boxFace('door', 1), x + 16 * S + 4, y, S);
+    label('door leaf / edge', x, y - 4);
+    x += 32 * S + 14;
+    more.slice(0, 10).forEach(function (w) { blit(w, x, y, 2); x += 32 * 2 + 4; });
+    label('misc walls (2x)', x - 10 * 68, y - 4);
+    y += 96 * S + 22; x = 8;
+    // floors
+    label('floor textures (' + tex.floorTextures.length + ')', x, y - 4);
+    tex.floorTextures.forEach(function (t, i) {
+      if (x + 16 * S > W - 8) { x = 8; y += 16 * S + 4; }
+      blit(t, x, y, S); x += 16 * S + 4;
+    });
+    y += 16 * S + 22; x = 8;
+    // ceiling 2x2 tiled at 2x
+    label('ceiling (2x2 tiles)', x, y - 4);
+    for (var cy = 0; cy < 2; cy++) for (var cx = 0; cx < 2; cx++) blit(tex.ceiling, x + cx * 128, y + cy * 128, 2);
+    x += 270;
+    // decal chunks
+    ['stockroom', 'decon', 'double'].forEach(function (k, i) {
+      var d = tex.decal(k), run = map.runs[k];
+      var g = run.grid[0], sx = Math.max(0, Math.round(g.x / 2) - 60), sy = Math.max(0, Math.round(g.y / 2) - 180);
+      if (i === 1) { var f = run.finish; sx = Math.round(f.x / 2) - 40; sy = Math.round(f.y / 2) - 120; }
+      if (i === 2) { sx = Math.round(105 * 8) - 60; sy = Math.round(76 * 8) - 60; }
+      blit({ w: d.w, h: d.h, data: d.data }, x, y, 1, sx, sy, 120, 256);
+      label('decal ' + k, x, y - 4);
+      x += 130;
+    });
+    y += 270; x = 8;
+    // sprites
+    var names = ['bollard', 'column', 'palletjack', 'bins', 'crates', 'cart', 'exitsign',
+      'pickup', 'pickup', 'pickup', 'pickup', 'drop_wrap', 'drop_peanuts', 'drop_box', 'ehs', 'ehs'];
+    var fr = { pickup: 0, ehs: 0 };
+    names.forEach(function (n) {
+      var f = fr[n] !== undefined ? fr[n]++ : 0;
+      var s = tex.sprite(n, f), t = s.tex;
+      var sc = n === 'column' ? 2 : S;
+      if (x + t.w * sc > W - 8) { x = 8; y += 200; }
+      blit(t, x, y, sc);
+      label(n + (f ? '#' + f : ''), x, y - 4);
+      x += t.w * sc + 10;
+    });
+  } else if (part === 'agv') {
+    var S2 = +(q.get('s') || 2), x2, y2 = 16;
+    var cfgs = [];
+    ['#e04040', '#3a7bff', '#c060ff'].forEach(function (c) {
+      [0, 2, 4].forEach(function (b) { cfgs.push([c, b, false]); });
+    });
+    cfgs.push(['#e04040', 4, true], ['#3a7bff', 3, true], ['#c060ff', 1, true]);
+    cfgs.forEach(function (cfg) {
+      x2 = 8;
+      for (var v = 0; v < 16; v++) {
+        var a = tex.agv(cfg[0], cfg[1], v, cfg[2]);
+        blit(a.tex, x2, y2, S2);
+        if (cfg === cfgs[0]) label('v' + v, x2, y2 - 4);
+        x2 += 48 * S2 + 2;
+      }
+      y2 += 36 * S2 + 4;
+    });
+  }
+  ctx.putImageData(img, 0, 0);
+  ctx.fillStyle = '#fff'; ctx.font = '11px monospace';
+  labels.forEach(function (l) { ctx.fillText(l[0], l[1], l[2]); });
+})();
+</script>
+</body>
+</html>

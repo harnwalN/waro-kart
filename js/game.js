@@ -10,10 +10,12 @@
   var R = 9;                         // AGV collision radius
   var MAX_SPEED = 120, ACCEL = 150, BRAKE = 280, REV_MAX = 45, COAST = 70;
   var TURN = 2.9, DRIFT_TURN = 3.9;  // rad/s at full steering authority
+  var HUMAN_STEER_IN = 7, HUMAN_STEER_OUT = 12, HUMAN_HISPEED_EASE = 0.12;   // human steering ramp (per s), top-speed ease
   var GRIP = 11, GRIP_VINYL = 4.5, GRIP_DRIFT = 2.4, GRIP_DRIFT_VINYL = 1.6;
   var ESTOP_V = 70, BOXLOSS_V = 95, ESTOP_T = 0.4;
   var BOX_PENALTY = 2.0, MAX_BOXES = 4;
   var COUNTDOWN = 3;
+  var EHS_TEXT = 'CALL EHS!';         // player-facing name of an E-STOP
   var BOOST_T = 1.2, BOOST_MUL = 1.6, SLOW_T = 1.0, SPIN_T = 0.6, PING_T = 1.0;
   var PICKUP_RESPAWN = 6;
   var ITEMS = ['boost', 'wrap', 'peanuts', 'box', 'ping'];
@@ -158,7 +160,7 @@
         wp: 0, dnext: 0, place: idx + 1, splits: [],
         item: null, prevItem: false,
         estop: false, estopT: 0, immuneT: 0, boxCD: 0, bumpCD: 0,
-        boostT: 0, slowT: 0, spinT: 0, wobble: 0, drifting: false, slip: 0,
+        boostT: 0, slowT: 0, spinT: 0, wobble: 0, drifting: false, slip: 0, steerIn: 0,
         impact: 0, impNx: 0, impNy: 0,
         estops: 0, bestD: Infinity, noProgT: 0, stuckMax: 0, progressed: false,
         wrongT: 0, wrongWay: false, popup: null,
@@ -311,17 +313,18 @@
     if (!race.fx) return;
     for (var i = 0; i < n; i++) {
       var a = Math.random() * Math.PI * 2, v = spd * (0.4 + Math.random() * 0.6);
-      race.particles.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: life * (0.6 + Math.random() * 0.4), color: color, size: size || 1 });
+      race.particles.push({ x: x, y: y, z: 4, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: life * (0.6 + Math.random() * 0.4), color: color, size: size || 1 });
     }
     if (race.particles.length > 400) race.particles.splice(0, race.particles.length - 400);
   }
+  // (x, y) = the AGV's position. x/y drift up the screen for the top-down fallback; wx/wy stay put as the 3D anchor.
   function addFloat(race, x, y, text, color) {
     if (!race.fx) return;
-    race.floats.push({ x: x, y: y, text: text, color: color || '#ffffff', life: 1.2 });
+    race.floats.push({ x: x, y: y - 14, wx: x, wy: y, text: text, color: color || '#ffffff', life: 1.2 });
   }
   function setPopup(r, text, sub, color) { r.popup = { text: text, sub: sub || '', color: color || '#ffe14a', t: 2.0 }; }
 
-  // ===== E-STOP, boxes, hazards =====
+  // ===== E-STOP (shown to players as "CALL EHS!"), boxes, hazards =====
   function triggerEstop(race, r, dur) {
     r.estopT = Math.max(r.estopT, dur);
     r.estop = true;
@@ -329,7 +332,7 @@
     r.vx = 0; r.vy = 0; r.speed = 0;
     r.ai.stuck = 0;
     snd(race, 'estop', r);
-    addFloat(race, r.x, r.y - 14, 'E-STOP', '#ff4040');
+    addFloat(race, r.x, r.y, EHS_TEXT, '#ffd23a');   // top-down only: the 3D view shows its own EHS sign
   }
   function placeDrop(race, x, y, ax, ay, dist0) {
     // Find a clear floor spot near (x,y) along direction (ax,ay), falling back to rotations around it.
@@ -349,7 +352,7 @@
     race.drops.push({ kind: 'box', x: p.x, y: p.y, r: 5, owner: r, armT: 1.0, life: Infinity });
     r.wobble = clamp(r.wobble + (race.rand() < 0.5 ? -0.8 : 0.8), -1, 1);
     snd(race, 'boxlost', r);
-    addFloat(race, r.x, r.y - 16, '-1 BOX', '#ffffff');
+    addFloat(race, r.x, r.y, '-1 BOX', '#ffffff');
     addParticles(race, r.x, r.y, '#f4f4f4', 6, 40, 0.5, 2);
   }
   function handleImpact(race, r) {
@@ -383,7 +386,7 @@
         } else if (d.kind === 'wrap') {
           r.slowT = SLOW_T; r.vx *= 0.5; r.vy *= 0.5;
           snd(race, 'bump', r);
-          addFloat(race, r.x, r.y - 14, 'STUCK!', '#bfe8ff');
+          addFloat(race, r.x, r.y, 'STUCK!', '#bfe8ff');
         } else if (d.kind === 'peanuts') {
           r.spinT = SPIN_T; r.vx *= 0.6; r.vy *= 0.6;
           r.impNx = 0; r.impNy = 0;
@@ -435,7 +438,7 @@
     } else if (it === 'box') {
       r.boxes = Math.min(MAX_BOXES, r.boxes + 1);
       snd(race, 'pickup', r);
-      addFloat(race, r.x, r.y - 16, '+1 BOX', '#9fffb0');
+      addFloat(race, r.x, r.y, '+1 BOX', '#9fffb0');
     } else if (it === 'ping') {
       var tgt = pingTarget(race, r);
       race.rings.push({ x: r.x, y: r.y, life: 0.5, max: 0.5, rad: 60, color: '#7ff7ff' });
@@ -487,7 +490,7 @@
       if (r.estopT <= 0) { r.estopT = 0; r.estop = false; r.immuneT = 0.8; }
     }
     if (race.phase !== 'race' || r.estopT > 0) {
-      r.vx = 0; r.vy = 0; r.speed = 0; r.drifting = false;
+      r.vx = 0; r.vy = 0; r.speed = 0; r.drifting = false; r.steerIn = 0;
       r.wobble *= Math.exp(-3 * dt);
       collideWorld(race, r);      // doors/movers can still push a stopped AGV
       r.impact = 0;
@@ -502,7 +505,15 @@
 
     // Steering (scaled by speed, reversed when backing up)
     var fs0 = r.vx * Math.cos(r.angle) + r.vy * Math.sin(r.angle);
-    var steer = r.spinT > 0 ? 0 : clamp(c.steer, -1, 1);
+    var steerIn = clamp(c.steer, -1, 1);
+    if (r.human) {
+      // Keyboard steering ramps in over ~0.15 s (and out faster) so taps make small corrections in the chase cam,
+      // and full lock is eased off a little at top speed. CPUs steer directly.
+      var rate = steerIn === 0 || sign(steerIn) !== sign(r.steerIn) ? HUMAN_STEER_OUT : HUMAN_STEER_IN;
+      r.steerIn += clamp(steerIn - r.steerIn, -rate * dt, rate * dt);
+      steerIn = r.steerIn * (1 - HUMAN_HISPEED_EASE * clamp((Math.abs(fs0) - 60) / 60, 0, 1));
+    }
+    var steer = r.spinT > 0 ? 0 : steerIn;
     var drift = c.drift && fs0 > 40 && Math.abs(steer) > 0.2;
     var scale = clamp(Math.abs(fs0) / 45, 0, 1), dir = fs0 >= 0 ? 1 : -1;
     r.angle += steer * (drift ? DRIFT_TURN : TURN) * scale * dir * dt;
@@ -986,6 +997,16 @@
     ctx.fillText(str, x, y);
     ctx.textAlign = 'left';
   }
+  function textPlain(str, x, y, color, scale, align) { text(str, x, y, color, scale, align); }
+  // Text with a 1 px black outline on all four sides (readable over the textured 3D view).
+  function textOutline(str, x, y, color, scale, align) {
+    if (!gfxFn('text')) { text(str, x, y, color, scale, align); return; }
+    var s = Math.max(1, Math.round(scale || 1));
+    G('text', S.ctx, str, x - 1, y, '#000000', s, align); G('text', S.ctx, str, x + 1, y, '#000000', s, align);
+    G('text', S.ctx, str, x, y - 1, '#000000', s, align); G('text', S.ctx, str, x, y + s, '#000000', s, align);
+    G('text', S.ctx, str, x + 1, y + s, '#000000', s, align);
+    G('text', S.ctx, str, x, y, color || '#ffffff', s, align);
+  }
   function textW(str, scale) {
     var fn = gfxFn('textWidth');
     if (fn) { try { return fn.call(AGV.gfx, str, scale || 1); } catch (e) { /* fall through */ } }
@@ -1022,11 +1043,7 @@
     });
     S.recorded = {};
     S.newBest = {};
-    S.cams = [];
-    S.race.racers.forEach(function (r) {
-      if (r.human) S.cams[r.hIndex] = { x: r.x, y: r.y };
-    });
-    if (!S.cams.length) S.cams[0] = { x: S.race.racers[0].x, y: S.race.racers[0].y };
+    S.cams = [];   // updateCameras snaps a fresh chase camera onto each human's grid slot on the first frame
     S.acc = 0;
     S.resultsIdx = 0;
     go('race');
@@ -1197,17 +1214,135 @@
     drawControlsHint(130);
     text(n === 2 ? 'P1: A/D + SPACE    P2: ARROWS + ENTER' : 'LEFT/RIGHT + ENTER', VW / 2, 117, '#aab4c4', 1, 'center');
   }
+  // ===== Chase camera (pseudo-3D race view) =====
+  // One camera per human: { x, y, z, angle, pitch, fov } for AGV.view3d, plus smoothing state.
+  // cam.angle trails the racer's heading through a critically damped spring; the eye sits profile.dist px behind the racer
+  // along cam.angle, pulled in so it never ends up inside or right against anything solid.
+  // Two framings: 44 px behind suits a 160x180 split-screen viewport. On the full 320x180 view the same horizontal FOV
+  // doubles the focal length, and at 44 px the floor only shows from ~68 px ahead, so the AGV would sit below the screen;
+  // 1P/TT therefore chase from ~70 px back.
+  var CAM_PROFILES = {
+    split: { dist: 44, z: 30, fov: 1.15, pitch: -8, dBoost: 8, fBoost: 0.12 },
+    full: { dist: 70, z: 30, fov: 1.15, pitch: -14, dBoost: 10, fBoost: 0.12 }
+  };
+  var CAM_OMEGA = 9, CAM_MAX_LAG = 0.36;           // heading spring (rad/s) and the most the view may trail the AGV
+  var CAM_MARGIN = 6, CAM_STEP = 2;                // keep-out distance from solids, march step (px)
+  var CAM_NEAR_HIDE = 14;                          // closer than this, the player's own AGV is left out of the scene
+  var SWEEP_DIST = 118, SWEEP_Z = 72, SWEEP_YAW = 1.0, SWEEP_PITCH = -24;   // countdown fly-in start
+  var PITCH_K = 140, PITCH_C = 11;                 // brake-dip / bump-bob spring
+
+  function has3D() {
+    var v = AGV.view3d;
+    return !!(v && typeof v.render === 'function' && !S.v3dBroken);
+  }
+  // Solid for the camera: walls (CURB is drawn as a floor strip, so it doesn't count), props, door leaves, movers.
+  function camBlocked(race, x, y) {
+    var m = CAM_MARGIN, map = AGV.map, curb = T().CURB;
+    var x0 = Math.floor((x - m) / TS), x1 = Math.floor((x + m) / TS), y0 = Math.floor((y - m) / TS), y1 = Math.floor((y + m) / TS);
+    for (var ty = y0; ty <= y1; ty++) {
+      for (var tx = x0; tx <= x1; tx++) {
+        var id = map.at(tx, ty);
+        if (id !== curb && AGV.isSolid(id)) return true;
+      }
+    }
+    var s = race.solids;
+    for (var i = 0; i < s.length; i++) {
+      var q = s[i];
+      if (x + m > q.x && x - m < q.x + q.w && y + m > q.y && y - m < q.y + q.h) return true;
+    }
+    return false;
+  }
+  // March from (x, y) along (dx, dy) in CAM_STEP px steps; return the furthest clear distance up to `want`.
+  function camClearDist(race, x, y, dx, dy, want) {
+    var t = 0;
+    while (t + CAM_STEP <= want) {
+      if (camBlocked(race, x + dx * (t + CAM_STEP), y + dy * (t + CAM_STEP))) return t;
+      t += CAM_STEP;
+    }
+    if (t < want && !camBlocked(race, x + dx * want, y + dy * want)) t = want;
+    return t;
+  }
+  // Critically damped spring on an angle (wraps correctly across +-PI).
+  function dampAngle(cam, target, omega, dt) {
+    var x = omega * dt, ex = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    var ch = angDiff(cam.heading, target), tmp = (cam.hv + omega * ch) * dt;
+    cam.hv = (cam.hv - omega * tmp) * ex;
+    cam.heading = angDiff(target + (ch + tmp) * ex, 0);
+  }
+  function newCam(r) {
+    return {
+      x: r.x, y: r.y, z: CAM_PROFILES.split.z, angle: r.angle, pitch: 0, fov: CAM_PROFILES.split.fov,
+      heading: r.angle, hv: 0, tgt: r.angle, dist: null, bk: 0, p: 0, pv: 0, lastSp: 0,
+      td: { x: r.x, y: r.y }, lastItem: null, itemMsg: null, itemMsgT: 0
+    };
+  }
+  function updateChaseCam(cam, r, race, dt, snap, pr) {
+    // Heading: hold the pre-spin heading while a peanut spill spins the AGV, so the view doesn't whirl.
+    if (r.spinT <= 0 || cam.tgt == null) cam.tgt = r.angle;
+    if (snap) { cam.heading = cam.tgt; cam.hv = 0; }
+    else if (dt > 0) dampAngle(cam, cam.tgt, CAM_OMEGA, dt);
+    var lag = angDiff(cam.heading, cam.tgt);
+    if (Math.abs(lag) > CAM_MAX_LAG) cam.heading = angDiff(cam.tgt + sign(lag) * CAM_MAX_LAG, 0);
+
+    // Boost: pull back and widen the FOV a little.
+    var boosting = r.boostT > 0 ? 1 : 0;
+    cam.bk = snap ? boosting : cam.bk + (boosting - cam.bk) * (1 - Math.exp(-4 * dt));
+    var want = pr.dist + pr.dBoost * cam.bk, fov = pr.fov + pr.fBoost * cam.bk;
+    var z = pr.z, yaw = 0, pitch0 = pr.pitch;
+
+    // Countdown: fly in from higher, further back and off to one side, down to the chase position.
+    if (race.phase === 'countdown') {
+      var s = clamp((race.countdown - 0.5) / (COUNTDOWN - 0.5), 0, 1), e = s * s * (3 - 2 * s);
+      want = lerp(want, SWEEP_DIST, e); z = lerp(z, SWEEP_Z, e);
+      yaw = SWEEP_YAW * e * (r.hIndex === 1 ? -1 : 1); pitch0 = lerp(pitch0, SWEEP_PITCH, e);
+    }
+
+    var ang = angDiff(cam.heading + yaw, 0), dx = -Math.cos(ang), dy = -Math.sin(ang);
+    var clear = camClearDist(race, r.x, r.y, dx, dy, want);
+    if (snap || cam.dist == null || clear < cam.dist) cam.dist = clear;
+    else cam.dist += (clear - cam.dist) * (1 - Math.exp(-5 * dt));
+    // Squeezed in close (backed against a wall): lift the eye a little so the view isn't buried in the AGV.
+    var squeeze = clamp(1 - cam.dist / pr.dist, 0, 1);
+    z += squeeze * 10;
+
+    // Pitch: small dip under hard braking, a damped bob on sudden stops (bumps, E-STOP).
+    var sp = r.speed, decel = dt > 0 && !snap ? (cam.lastSp - sp) / dt : 0;
+    cam.lastSp = sp;
+    var ptgt = sp > 10 && decel > 120 ? -3 * clamp((decel - 120) / 160, 0, 1) : 0;
+    if (snap) { cam.p = 0; cam.pv = 0; }
+    else {
+      if (decel > 500) cam.pv += clamp(decel / 25, 0, 30);
+      for (var left = Math.min(dt, 0.25); left > 1e-6; left -= 1 / 60) {
+        var h = Math.min(left, 1 / 60);
+        cam.pv += (-PITCH_K * (cam.p - ptgt) - PITCH_C * cam.pv) * h;
+        cam.p += cam.pv * h;
+      }
+      cam.p = clamp(cam.p, -5, 5);
+    }
+
+    cam.x = r.x + dx * cam.dist; cam.y = r.y + dy * cam.dist; cam.z = z;
+    cam.angle = ang; cam.fov = fov;
+    cam.pitch = Math.round(pitch0 + cam.p - squeeze * 6);
+  }
   function updateCameras(dt) {
     var race = S.race;
     var humans = race.racers.filter(function (r) { return r.human; });
     if (!humans.length) humans = [race.order[0]];
     var k = 1 - Math.exp(-6 * Math.min(dt, 0.1));
+    var pr = humans.length > 1 ? CAM_PROFILES.split : CAM_PROFILES.full;
     humans.forEach(function (r, i) {
-      var cam = S.cams[i] || (S.cams[i] = { x: r.x, y: r.y });
+      var snap = !S.cams[i];
+      var cam = S.cams[i] || (S.cams[i] = newCam(r));
+      updateChaseCam(cam, r, race, Math.min(dt, 0.25), snap, pr);
+      // Top-down focus point, only used by the fallback view.
       var lx = r.vx * 0.35, ly = r.vy * 0.35, ll = Math.sqrt(lx * lx + ly * ly);
       if (ll > 48) { lx *= 48 / ll; ly *= 48 / ll; }
-      cam.x += (r.x + lx - cam.x) * k;
-      cam.y += (r.y + ly - cam.y) * k;
+      cam.td.x += (r.x + lx - cam.td.x) * k;
+      cam.td.y += (r.y + ly - cam.td.y) * k;
+      // Item toast: name + what it does, shown for a moment after a pickup.
+      if (r.item && r.item !== cam.lastItem) { cam.itemMsg = r.item; cam.itemMsgT = 2.4; }
+      cam.lastItem = r.item;
+      cam.itemMsgT = Math.max(0, cam.itemMsgT - dt);
     });
   }
   function camOrigin(cam, vw, vh) {
@@ -1227,10 +1362,74 @@
       drawViewport(humans[0] || race.order[0], S.cams[0], 0, VW, VH, false);
     }
   }
-  function inView(x, y, cx, cy, vw, vh, m) { return x > cx - m && x < cx + vw + m && y > cy - m && y < cy + vh + m; }
   function drawViewport(r, cam, vx, vw, vh, small) {
+    if (has3D() && drawViewport3D(r, cam, vx, vw, vh, small)) return;
+    drawViewportTop(r, cam, vx, vw, vh, small);
+  }
+
+  // ----- 3D viewport -----
+  function buildScene(race, me, cam) {
+    var map = AGV.map, i;
+    var scene = { t: race.clock, runKey: race.runKey, racers: [], pickups: [], drops: race.drops, doors: [], movers: [], particles: race.particles };
+    for (i = 0; i < race.racers.length; i++) {
+      var a = race.racers[i];
+      if (a === me && cam.dist < CAM_NEAR_HIDE) continue;
+      scene.racers.push({
+        x: a.x, y: a.y, angle: a.angle, color: a.color, boxes: a.boxes, estop: a.estop, boost: a.boostT > 0,
+        finished: a.finished, tag: a.human && a !== me && race.nHumans > 1 ? a.tag : '', wobble: a.wobble, id: a.id
+      });
+    }
+    for (i = 0; i < race.pickups.length; i++) if (race.pickups[i].cool <= 0) scene.pickups.push(race.pickups[i]);
+    (map.doors || []).forEach(function (d, k) { scene.doors.push({ door: d, openFrac: race.doorFracs[k] == null ? 1 : race.doorFracs[k] }); });
+    (map.movers || []).forEach(function (m, k) { if (race.moverRects[k]) scene.movers.push({ mover: m, rect: race.moverRects[k] }); });
+    // Lidar ping rings become a ring of floor-level sparks.
+    if (race.rings.length) {
+      scene.particles = race.particles.slice();
+      race.rings.forEach(function (g) {
+        var f = 1 - g.life / g.max, rad = 4 + f * g.rad;
+        for (var k = 0; k < 18; k++) {
+          var an = k / 18 * Math.PI * 2;
+          scene.particles.push({ x: g.x + Math.cos(an) * rad, y: g.y + Math.sin(an) * rad, z: 5, color: g.color, size: 2 });
+        }
+      });
+    }
+    return scene;
+  }
+  // Returns false if the 3D renderer failed (the caller then draws the top-down fallback).
+  function drawViewport3D(r, cam, vx, vw, vh, small) {
+    var race = S.race, ctx = S.ctx, v3 = AGV.view3d;
+    try {
+      ctx.save();
+      v3.render(ctx, vx, 0, vw, vh, cam, buildScene(race, r, cam));
+      ctx.restore();
+    } catch (e) {
+      ctx.restore();
+      S.v3dBroken = true;
+      if (root.console) console.warn('view3d.render failed, using the top-down view:', e);
+      return false;
+    }
+    ctx.save();
+    ctx.beginPath(); ctx.rect(vx, 0, vw, vh); ctx.clip();
+    ctx.translate(vx, 0);
+    if (typeof v3.project === 'function') {
+      race.floats.forEach(function (f) {
+        if (f.text === EHS_TEXT) return;   // view3d already floats a CALL EHS! sign over the AGV
+        var p = null;
+        try { p = v3.project(cam, vw, vh, f.wx, f.wy, 28 + (1.2 - f.life) * 14); } catch (e) { p = null; }
+        if (!p || p.sx < -40 || p.sx > vw + 40 || p.sy < -10 || p.sy > vh) return;
+        textOutline(f.text, Math.round(p.sx), Math.round(p.sy) - 4, f.color, 1, 'center');
+      });
+    }
+    drawHUD(r, cam, vw, vh, small);
+    ctx.restore();
+    return true;
+  }
+
+  // ----- Top-down fallback viewport (used when js/view3d.js is missing or fails) -----
+  function inView(x, y, cx, cy, vw, vh, m) { return x > cx - m && x < cx + vw + m && y > cy - m && y < cy + vh + m; }
+  function drawViewportTop(r, cam, vx, vw, vh, small) {
     var race = S.race, ctx = S.ctx, run = race.run, t = race.clock, map = AGV.map;
-    var o = camOrigin(cam, vw, vh), cx = o.x, cy = o.y, i;
+    var o = camOrigin(cam.td || cam, vw, vh), cx = o.x, cy = o.y, i;
     ctx.save();
     ctx.beginPath(); ctx.rect(vx, 0, vw, vh); ctx.clip();
     ctx.translate(vx, 0);
@@ -1271,7 +1470,7 @@
     race.floats.forEach(function (f) {
       if (inView(f.x, f.y, cx, cy, vw, vh, 30)) text(f.text, Math.round(f.x - cx), Math.round(f.y - cy), f.color, 1, 'center');
     });
-    drawHUD(r, vw, vh, small);
+    drawHUD(r, null, vw, vh, small);
     ctx.restore();
   }
   function drawWorldFallback(cx, cy, vw, vh) {
@@ -1283,20 +1482,85 @@
       ctx.fillRect(tx * TS - cx, ty * TS - cy, TS, TS);
     }
   }
+
+  // ===== HUD =====
+  var ITEM_INFO = {
+    boost: ['PRIORITY LABEL', 'SPEED BOOST!', 'SPEED BOOST!'],
+    wrap: ['SHRINK-WRAP', 'DROP A STICKY PATCH BEHIND YOU', 'STICKY PATCH BEHIND YOU'],
+    peanuts: ['PACKING PEANUTS', 'SPILL THEM BEHIND YOU', 'SPILL BEHIND YOU'],
+    box: ['SPARE BOX', 'GET A LOST BOX BACK', '+1 BOX'],
+    ping: ['LIDAR PING', 'THE AGV AHEAD HAS TO CALL EHS!', 'AGV AHEAD MUST CALL EHS!']
+  };
   function drawBoxIcon(x, y) {
     var ctx = S.ctx;
     ctx.fillStyle = '#f4f4f0'; ctx.fillRect(x, y, 8, 7);
     ctx.fillStyle = '#23336b'; ctx.fillRect(x, y + 3, 8, 1);
     ctx.fillStyle = '#b8b8b0'; ctx.fillRect(x, y + 6, 8, 1);
   }
-  function drawHUD(r, vw, vh, small) {
+  // 8-bit arrow centred at (cx, cy), pointing `rel` radians clockwise from straight up; n x n px, black outline.
+  var arrowMask = null;
+  function drawArrow(cx, cy, rel, n, color) {
+    var ctx = S.ctx, h = (n - 1) / 2, k = 7 / h, W = n + 2, i, j;
+    if (!arrowMask || arrowMask.length < W * W) arrowMask = new Uint8Array(W * W);
+    var m = arrowMask, fx = Math.sin(rel), fy = -Math.cos(rel);
+    for (j = 0; j < W; j++) {
+      for (i = 0; i < W; i++) {
+        var px = (i - 1 - h) * k, py = (j - 1 - h) * k;
+        var u = px * fx + py * fy, v = Math.abs(-px * fy + py * fx);   // u = along the arrow, v = across
+        m[j * W + i] = (u >= -6.5 && u <= 0.5 && v <= 1.7) || (u > 0.5 && u <= 6.8 && v <= (6.8 - u) * 0.85) ? 1 : 0;
+      }
+    }
+    var x0 = Math.round(cx - h) - 1, y0 = Math.round(cy - h) - 1;
+    ctx.fillStyle = '#000000';
+    for (j = 0; j < W; j++) for (i = 0; i < W; i++) {
+      if (m[j * W + i]) continue;
+      if ((i > 0 && m[j * W + i - 1]) || (i < W - 1 && m[j * W + i + 1]) || (j > 0 && m[(j - 1) * W + i]) || (j < W - 1 && m[(j + 1) * W + i])) ctx.fillRect(x0 + i, y0 + j, 1, 1);
+    }
+    ctx.fillStyle = color;
+    for (j = 0; j < W; j++) for (i = 0; i < W; i++) if (m[j * W + i]) ctx.fillRect(x0 + i, y0 + j, 1, 1);
+  }
+  // Segmented speed bar; lit segments run green -> yellow -> red, cyan while boosting.
+  function drawSpeedBar(r, x, y, small) {
+    var ctx = S.ctx, n = 10, sw = small ? 2 : 4, sh = small ? 3 : 4, gap = 1;
+    var frac = Math.abs(r.speed) / MAX_SPEED, lit = Math.min(n, Math.round(frac * n));
+    var boost = r.boostT > 0, over = boost && frac > 1.05 && Math.floor(S.t * 10) % 2 === 0;
+    ctx.fillStyle = '#000000'; ctx.fillRect(x - 1, y - 1, n * (sw + gap) + 1, sh + 2);
+    for (var i = 0; i < n; i++) {
+      var col = i >= lit ? '#2a2f3a' : boost ? (over ? '#ffffff' : '#7fd8ff') : i < 5 ? '#3ee070' : i < 8 ? '#ffd23a' : '#ff4a4a';
+      ctx.fillStyle = col; ctx.fillRect(x + i * (sw + gap), y, sw, sh);
+    }
+  }
+  // Yellow/black hazard-striped "CALL EHS!" plate, flashing between yellow-on-black and black-on-yellow.
+  // Drawn top-left under the position readout: the 3D view already floats an EHS sign over the AGV itself.
+  function drawEhsWarning(x, y, small, flash) {
+    var ctx = S.ctx, sc = small ? 1 : 2, msg = EHS_TEXT, bw = small ? 2 : 3;
+    var tw = textW(msg, sc), w = tw + (small ? 8 : 14) + bw * 2, h = 7 * sc + (small ? 6 : 8) + bw * 2;
+    var cx = x + w / 2;
+    ctx.fillStyle = '#000000'; ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+    ctx.fillStyle = '#ffd23a'; ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = '#111111';
+    var sp = small ? 6 : 8, off = Math.floor(S.t * 12) % sp;
+    for (var j = 0; j < h; j++) {
+      for (var i = -sp - (j + off) % sp; i < w; i += sp) {
+        var a = Math.max(0, i), b = Math.min(w, i + sp / 2);
+        if (b > a) ctx.fillRect(x + a, y + j, b - a, 1);
+      }
+    }
+    ctx.fillStyle = flash ? '#ffd23a' : '#111111';
+    ctx.fillRect(x + bw, y + bw, w - bw * 2, h - bw * 2);
+    if (!G('text', ctx, msg, Math.round(cx), y + bw + (small ? 3 : 4), flash ? '#111111' : '#ffd23a', sc, 'center')) {
+      text(msg, Math.round(cx), y + bw + 3, flash ? '#111111' : '#ffd23a', sc, 'center');
+    }
+  }
+  function drawHUD(r, cam, vw, vh, small) {
+    var text = cam ? textOutline : textPlain;   // the 3D view is busy and bright: outline the HUD text
     var race = S.race, ctx = S.ctx, blink = Math.floor(S.t * 4) % 2 === 0;
     var placeCol = ['#ffe14a', '#e8eef8', '#ff9a4a', '#c8d0e0'][Math.min(3, r.place - 1)];
     if (race.mode !== 'tt') {
       text(ordinal(r.place), 4, 4, placeCol, 2);
       text('/' + race.racers.length, 4 + textW(ordinal(r.place), 2) + 1, 10, '#aab4c4');
     } else {
-      text('TIME TRIAL', 4, 4, '#9fffb0');
+      text(small ? 'TT' : 'TIME TRIAL', 4, 4, '#9fffb0');
     }
     var tShown = r.finished ? r.finishTime : race.t;
     text(fmtTime(tShown), vw - 4, 4, '#ffffff', 1, 'right');
@@ -1308,15 +1572,27 @@
     panel(ix, 2, 22, 22);
     if (r.item) G('itemIcon', ctx, r.item, ix + 3, 5);
 
+    // Next-waypoint arrow under the item box, relative to the view direction.
+    var wps = race.run.waypoints, popY = small ? 42 : 46;
+    if (cam && !r.finished && wps.length) {
+      var w = wps[Math.min(r.wp, wps.length - 1)];
+      var rel = angDiff(Math.atan2(w.y - r.y, w.x - r.x), cam.angle);
+      var an = small ? 11 : 15, acol = r.wrongWay ? (blink ? '#ff4a4a' : '#ffffff') : (w.label ? '#9fffb0' : '#ffe14a');
+      drawArrow(vw / 2, 26 + (an + 1) / 2, rel, an, acol);
+    }
+
     var area = '';
     try { area = AGV.areaAt ? AGV.areaAt(r.x, r.y) || '' : ''; } catch (e) { area = ''; }
     if (area) text(area, 4, vh - 10, '#cfd6e0');
+    if (cam) drawSpeedBar(r, 4, vh - (small ? 16 : 18), small);
 
-    if (!small) {
-      var map = AGV.map, mw = 64, mh = Math.round(clamp(64 * map.H / map.W, 24, 60));
-      if (mh === 60) mw = Math.round(60 * map.W / map.H);
+    var map = AGV.map, mw = small ? 40 : 64, mh = Math.round(clamp(mw * map.H / map.W, 24, small ? 40 : 60));
+    if (mh === (small ? 40 : 60)) mw = Math.round(mh * map.W / map.H);
+    if (cam || !small) {
       var dots = race.racers.map(function (a) { return { x: a.x, y: a.y, color: a.color }; });
-      G('minimap', ctx, vw - mw - 4, vh - mh - 4, mw, mh, race.run, dots);
+      // Own dot last so it is drawn on top.
+      dots.sort(function (a, b) { return (a.color === r.color) - (b.color === r.color); });
+      G('minimap', ctx, vw - mw - (small ? 3 : 4), vh - mh - (small ? 3 : 4), mw, mh, race.run, dots);
     }
 
     if (race.phase === 'countdown') {
@@ -1325,18 +1601,25 @@
     } else if (race.goT > 0) {
       text('GO!', vw / 2, vh / 2 - 20, '#9fffb0', 4, 'center');
     }
-    if (r.wrongWay && !r.finished && blink) text('WRONG WAY', vw / 2, vh / 2 + 18, '#ff4a4a', small ? 1 : 2, 'center');
-    if (r.estop && blink) text('E-STOP', vw / 2, vh / 2 + 34, '#ff4a4a', 1, 'center');
+    if (r.wrongWay && !r.finished && blink) text('WRONG WAY', vw / 2, vh / 2 + 4, '#ff4a4a', small ? 1 : 2, 'center');
+    if (r.estop && !r.finished) {
+      if (cam) drawEhsWarning(4, 22, small, blink);
+      else drawEhsWarning(Math.round(vw / 2 - (small ? 36 : 66)), Math.round(vh / 2) + 20, small, blink);
+    }
     if (r.popup) {
       var sc = small || textW(r.popup.text, 2) > vw - 8 ? 1 : 2;
-      text(r.popup.text, vw / 2, 40, r.popup.color, sc, 'center');
+      text(r.popup.text, vw / 2, popY, r.popup.color, sc, 'center');
       if (r.popup.sub) {
         var col = r.popup.sub.indexOf('-') >= 0 ? '#9fffb0' : r.popup.sub.indexOf('+') >= 0 ? '#ff9090' : '#ffffff';
-        text(r.popup.sub, vw / 2, 40 + 9 * sc + 3, col, 1, 'center');
+        text(r.popup.sub, vw / 2, popY + 9 * sc + 3, col, 1, 'center');
       }
+    } else if (cam && cam.itemMsgT > 0 && cam.itemMsg && ITEM_INFO[cam.itemMsg] && !r.finished) {
+      var info = ITEM_INFO[cam.itemMsg];
+      text(info[0], vw / 2, popY, '#ffe14a', 1, 'center');
+      text(small ? info[2] : info[1], vw / 2, popY + 10, '#ffffff', 1, 'center');
     }
     if (r.finished && !r.popup && S.state === 'race') {
-      text(race.mode === 'tt' ? 'FINISHED' : 'FINISHED ' + ordinal(r.finishOrder), vw / 2, 40, '#ffffff', 1, 'center');
+      text(race.mode === 'tt' ? 'FINISHED' : 'FINISHED ' + ordinal(r.finishOrder), vw / 2, popY, '#ffffff', 1, 'center');
     }
   }
   function resultsRows() {
@@ -1453,6 +1736,11 @@
     root.addEventListener('keyup', onKeyUp);
     root.addEventListener('blur', function () { keys = {}; });
     if (gfxFn('init')) { try { AGV.gfx.init(); } catch (e) { if (root.console) console.warn('gfx.init failed:', e); } }
+    // 3D race view: textures first, then the renderer (both optional; without them races use the top-down view).
+    ['tex', 'view3d'].forEach(function (k) {
+      var m = AGV[k];
+      if (m && typeof m.init === 'function') { try { m.init(); } catch (e) { if (root.console) console.warn(k + '.init failed:', e); } }
+    });
     root.requestAnimationFrame(frame);
   }
 

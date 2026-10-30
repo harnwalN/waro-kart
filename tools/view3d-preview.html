@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>view3d preview</title>
+<style>
+  html, body { margin: 0; background: #0d0f14; color: #dde0e3; font: 12px/1.3 monospace; overflow: hidden; }
+  #wrap { position: relative; width: 960px; height: 540px; }
+  #screen { width: 960px; height: 540px; image-rendering: pixelated; display: block; }
+  #ov { position: absolute; left: 0; top: 0; pointer-events: none; }
+  #info { padding: 4px 8px; white-space: pre; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="screen" width="320" height="180"></canvas>
+  <canvas id="ov" width="960" height="540"></canvas>
+</div>
+<div id="info">loading...</div>
+<script src="../js/map.js"></script>
+<script src="../js/gfx.js"></script>
+<script src="../js/tex.js" onerror="window.NO_TEX = true"></script>
+<script src="../js/view3d.js"></script>
+<script>
+// Query params:
+//   preset=dock|hall|corner|doors|stockroom|decon   (or x=&y=&a= in tiles / degrees)
+//   t=<seconds>        scene time (doors, movers, pickups)
+//   open=<0..1>        override every door's openFrac
+//   split=1            render two 160x180 viewports (P1 left, P2 right, P2 turned 25 deg)
+//   fwd=<px>           move the camera forward by px (to check that billboards do not slide)
+//   z=, pitch=, fov=   camera overrides (fov in degrees)
+//   notex=1            ignore tex.js (placeholder textures)
+//   labels=0           hide the overlay labels
+//   own=<px>           distance of the player's own AGV ahead of the camera (default 44)
+//   sheet=1            show the 16 AGV billboard views (tex.js and placeholder) instead of the 3D view
+(function () {
+  var q = {};
+  location.search.replace(/^\?/, '').split('&').forEach(function (kv) {
+    if (!kv) return;
+    var p = kv.split('=');
+    q[decodeURIComponent(p[0])] = decodeURIComponent(p[1] || '');
+  });
+  var PRESETS = {
+    dock:      { x: 15,    y: 126,  a: -90 },
+    hall:      { x: 24,    y: 84,   a: 0 },
+    corner:    { x: 99,    y: 85,   a: -40 },
+    doors:     { x: 107,   y: 86.5, a: -90 },
+    stockroom: { x: 123,   y: 74,   a: -90 },
+    decon:     { x: 107,   y: 89,   a: 90 }
+  };
+  var pr = PRESETS[q.preset] || PRESETS.hall;
+  var T = AGV.TILE || 16;
+  if (q.notex) AGV.tex = undefined;
+  var deg = Math.PI / 180;
+  var cam = {
+    x: (q.x !== undefined ? +q.x : pr.x) * T,
+    y: (q.y !== undefined ? +q.y : pr.y) * T,
+    angle: (q.a !== undefined ? +q.a : pr.a) * deg,
+    z: q.z !== undefined ? +q.z : 30,
+    pitch: q.pitch !== undefined ? +q.pitch : 0,
+    fov: q.fov !== undefined ? +q.fov * deg : 1.15
+  };
+  var t = q.t !== undefined ? +q.t : 1.0;
+  var fx = Math.cos(cam.angle), fy = Math.sin(cam.angle), rx = -fy, ry = fx;
+
+  // Racers are placed relative to the ORIGINAL camera, then the camera may move
+  // forward by `fwd` px, so you can compare two shots for sliding.
+  function place(ahead, right, headingOff, o) {
+    var r = {
+      x: cam.x + fx * ahead + rx * right, y: cam.y + fy * ahead + ry * right,
+      angle: cam.angle + headingOff * deg, color: o.color, boxes: o.boxes, estop: !!o.estop,
+      boost: false, finished: false, tag: o.tag || '', label: o.label
+    };
+    return r;
+  }
+  var racers = [
+    place(+(q.own || 44), 0, 0, { color: '#e04040', boxes: 4, tag: 'P1', label: 'own (rear)' }),
+    place(120, -40, 90, { color: '#3a7bff', boxes: 3, label: 'L->R' }),
+    place(170, 30, 180, { color: '#c060ff', boxes: 2, label: 'facing' }),
+    place(90, 38, 45, { color: '#3ccf5a', boxes: 1, estop: true, label: 'estop 45' }),
+    place(230, -10, -90, { color: '#f3c22c', boxes: 4, label: 'R->L' })
+  ];
+  var fwd = +(q.fwd || 0);
+  cam.x += fx * fwd; cam.y += fy * fwd;
+
+  if (AGV.tex && AGV.tex.init) { try { AGV.tex.init(); } catch (e) { console.error(e); } }
+  AGV.view3d.init();
+
+  var open = q.open !== undefined ? +q.open : null;
+  var openFracs = [0.5, 0.15];
+  var scene = {
+    t: t, runKey: q.run || 'stockroom', racers: racers,
+    pickups: AGV.map.pickups,
+    drops: [
+      { kind: 'wrap', x: cam.x + fx * 70 + rx * -20, y: cam.y + fy * 70 + ry * -20 },
+      { kind: 'peanuts', x: cam.x + fx * 75 + rx * 25, y: cam.y + fy * 75 + ry * 25 },
+      { kind: 'box', x: cam.x + fx * 140 + rx * 10, y: cam.y + fy * 140 + ry * 10 }
+    ],
+    doors: AGV.map.doors.map(function (d, i) {
+      return { door: d, openFrac: open !== null ? open : openFracs[i % openFracs.length] };
+    }),
+    movers: AGV.map.movers.map(function (m) { return { mover: m, rect: AGV.moverRect(m, t) }; }),
+    particles: [0, 1, 2, 3, 4, 5].map(function (i) {
+      return { x: cam.x + fx * (50 + i * 3), y: cam.y + fy * (50 + i * 3) + i, z: 4 + i * 2,
+        color: i & 1 ? '#ffd040' : '#ff7030', size: 2 };
+    })
+  };
+
+  var canvas = document.getElementById('screen');
+  var ctx = canvas.getContext('2d');
+  if (q.sheet) { drawSheet(ctx); return; }
+  var split = !!q.split;
+  var cam2 = { x: cam.x, y: cam.y, z: cam.z, pitch: cam.pitch, fov: cam.fov, angle: cam.angle + 25 * deg };
+  function frame() {
+    if (split) {
+      AGV.view3d.render(ctx, 0, 0, 160, 180, cam, scene);
+      AGV.view3d.render(ctx, 160, 0, 160, 180, cam2, scene);
+    } else {
+      AGV.view3d.render(ctx, 0, 0, 320, 180, cam, scene);
+    }
+  }
+  frame();
+  // Timing: 20 warm-up frames, then 200 timed.
+  for (var w = 0; w < 20; w++) frame();
+  var N = 200, t0 = performance.now();
+  for (var i = 0; i < N; i++) { scene.t = t + i / 6000; frame(); }
+  var ms = (performance.now() - t0) / N;
+  scene.t = t; frame();
+
+  // Overlay labels: racer view index + description, via project().
+  var ov = document.getElementById('ov').getContext('2d');
+  if (q.labels !== '0' && !split) {
+    ov.font = '12px monospace';
+    ov.textAlign = 'center';
+    racers.forEach(function (r) {
+      var p = AGV.view3d.project(cam, 320, 180, r.x, r.y, 22);
+      if (!p) return;
+      var v = AGV.view3d.agvView(cam, r.x, r.y, r.angle);
+      var s = r.label + ' v' + v;
+      ov.fillStyle = 'rgba(0,0,0,0.6)';
+      ov.fillRect(p.sx * 3 - 40, p.sy * 3 - 26, 80, 14);
+      ov.fillStyle = '#fff';
+      ov.fillText(s, p.sx * 3, p.sy * 3 - 15);
+    });
+  }
+  document.getElementById('info').textContent =
+    'preset=' + (q.preset || 'hall') + '  cam=(' + (cam.x / T).toFixed(1) + ', ' + (cam.y / T).toFixed(1) +
+    ') a=' + (cam.angle / deg).toFixed(0) + '  tex.js: ' + (AGV.tex ? 'yes' : 'NO (placeholders)') +
+    (split ? '  split 2x160x180' : '  320x180') +
+    '\navg render: ' + ms.toFixed(3) + ' ms/frame over ' + N + ' frames';
+  document.title = 'view3d ' + ms.toFixed(3) + ' ms';
+
+  // Sheet mode: the 16 AGV views side by side (row 1: tex.js, row 2: tex.js with
+  // 1 box + red light, row 3: view3d placeholder). View 0 = rear, 4 = nose right,
+  // 8 = front, 12 = nose left.
+  function drawSheet(c) {
+    c.fillStyle = '#3a3f48'; c.fillRect(0, 0, 320, 180);
+    var img = c.getImageData(0, 0, 320, 180), b = new Uint32Array(img.data.buffer);
+    function blit(t, ox, oy) {
+      for (var y = 0; y < t.h && oy + y < 180; y++) for (var x = 0; x < t.w && ox + x < 320; x++) {
+        var px = t.data[y * t.w + x];
+        if ((px >>> 24) >= 128) b[(oy + y) * 320 + ox + x] = px;
+      }
+    }
+    var saved = AGV.tex;
+    for (var v = 0; v < 16; v++) {
+      var ox = (v % 8) * 40, oy = v < 8 ? 0 : 90;
+      if (saved && saved.agv) {
+        blit(saved.agv('#3a7bff', 4, v, false).tex, ox - 4, oy);
+        blit(saved.agv('#e04040', 1, v, true).tex, ox - 4, oy + 30);
+      }
+      AGV.tex = undefined;
+      AGV.view3d.render({}, 0, 0, 8, 8, {}, {});  // make sure fallbacks are built
+      AGV.tex = saved;
+    }
+    c.putImageData(img, 0, 0);
+    var ov = document.getElementById('ov').getContext('2d');
+    ov.font = '12px monospace'; ov.fillStyle = '#fff';
+    for (v = 0; v < 16; v++) ov.fillText('v' + v, ((v % 8) * 40 + 2) * 3, ((v < 8 ? 0 : 90) + 74) * 3);
+    document.getElementById('info').textContent = 'AGV views (tex.js). 0 = rear, 4 = nose right, 8 = front, 12 = nose left';
+  }
+})();
+</script>
+</body>
+</html>

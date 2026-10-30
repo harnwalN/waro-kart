@@ -12,7 +12,9 @@
 <body>
 <!-- Dev-only: boots the game and jumps straight into a race scene for headless screenshots.
      Query params: mode=1p|2p|tt  run=stockroom|decon|double  t=seconds to fast-forward
-     at=tx,ty[;tx,ty]  (teleport human racer(s) to tile coords)  ang=degrees  scene=title|race -->
+     at=tx,ty[;tx,ty]  (teleport human racer(s) to tile coords)  ang=degrees  scene=title|race
+     view=top (force the top-down fallback instead of the 3D chase cam)
+     HUD states for the human racer(s): item=boost|wrap|peanuts|box|ping  estop=1 (CALL EHS!)  boost=1  wrong=1 -->
 <canvas id="screen" width="320" height="180"></canvas>
 <div id="err"></div>
 <script>
@@ -20,6 +22,8 @@
 </script>
 <script src="../js/map.js"></script>
 <script src="../js/gfx.js"></script>
+<script src="../js/tex.js"></script>
+<script src="../js/view3d.js"></script>
 <script src="../js/audio.js"></script>
 <script src="../js/game.js"></script>
 <script>
@@ -41,9 +45,14 @@
     humans.forEach(function (r, i) {
       if (at[i]) { var p = at[i].split(','); r.x = +p[0] * T; r.y = +p[1] * T; r.speed = 0; }
       if (ang != null) r.angle = (+ang) * Math.PI / 180;
+      if (q.get('item')) r.item = q.get('item');
+      if (q.get('estop')) { r.estop = true; r.estopT = 60; }
+      if (q.get('boost')) { r.boostT = 60; r.speed = 150; r.vx = Math.cos(r.angle) * 150; r.vy = Math.sin(r.angle) * 150; }
+      if (q.get('wrong')) { r.wrongWay = true; r.wrongT = 60; }
     });
-    S.cams = humans.map(function (r) { return { x: r.x, y: r.y }; });
-    if (!S.cams.length) S.cams = [{ x: S.race.racers[0].x, y: S.race.racers[0].y }];
+    // The race view snaps a fresh chase camera onto each racer when S.cams is empty.
+    S.cams = [];
+    if (q.get('view') === 'top') S.v3dBroken = true;   // view=top forces the top-down fallback
     S.state = 'race'; S.stateT = 5;
   }
 </script>
