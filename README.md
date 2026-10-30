@@ -1,4 +1,4 @@
-# Peabody AGV Rally
+# WaRo Kart
 
 An 8-bit racing game set in the Peabody warehouse. You drive an automated guided vehicle (AGV) loaded with
 white boxes along the real AGV delivery routes. Lose boxes in crashes and you take a time penalty.
@@ -60,6 +60,6 @@ Plain HTML5 canvas and JavaScript, no build step. See `CONTRACT.md` for how the 
 
 ## Publish to GitHub Pages
 ```sh
-gh repo create agv-rally --public --source=. --push
-gh api -X POST repos/{owner}/agv-rally/pages -f "source[branch]=main" -f "source[path]=/"
+gh repo create waro-kart --public --source=. --push
+gh api -X POST repos/{owner}/waro-kart/pages -f "source[branch]=main" -f "source[path]=/"
 ```

@@ -1,4 +1,4 @@
-# Peabody AGV Rally — module contract
+# WaRo Kart — module contract
 
 This is the shared interface between the four JS files. Every file attaches to one global, `window.AGV`, and starts with
 `window.AGV = window.AGV || {};`. The files are classic `<script>` tags, not ES modules, so the game works from
@@ -113,7 +113,7 @@ AGV.gfx = {
   itemIcon(ctx, item, x, y),             // 16x16 icon; item in 'boost'|'wrap'|'peanuts'|'box'|'ping'
   minimap(ctx, x, y, w, h, run, dots),   // whole-map overview (pre-rendered once), route line, dots: [{x,y,color}] world px
   panel(ctx, x, y, w, h),                // 8-bit framed UI box (dark fill, light border)
-  title(ctx, t),                         // full-screen 320x180 title-screen art: "PEABODY AGV RALLY" logo + animated AGV
+  title(ctx, t),                         // full-screen 320x180 title-screen art: "WARO KART" logo + animated AGV
 };
 ```
 

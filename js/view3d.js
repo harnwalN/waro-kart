@@ -1,4 +1,4 @@
-// Peabody AGV Rally: view3d.js
+// WaRo Kart: view3d.js
 // Pseudo-3D raycast chase-camera renderer (early-90s "2.5D" style), see the
 // "v2: chase-cam pseudo-3D view" section of CONTRACT.md.
 //

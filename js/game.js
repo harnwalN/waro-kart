@@ -1,4 +1,4 @@
-// Peabody AGV Rally - game engine (boot, input, menus, race simulation, AI, items, cameras, HUD).
+// WaRo Kart - game engine (boot, input, menus, race simulation, AI, items, cameras, HUD).
 // The race simulation (createRace / step) is pure and runs headless in Node (see tools/sim.js).
 (function () {
   'use strict';
@@ -25,7 +25,7 @@
   ];
   var CPU_NAMES = ['AGV-07', 'AGV-12', 'AGV-21', 'AGV-33'];
   var RUN_KEYS = ['stockroom', 'decon', 'double'];
-  var BEST_KEY = 'agvRally.best.v1';
+  var BEST_KEY = 'waroKart.best.v1';
 
   // ===== Utilities =====
   function mulberry32(seed) {
@@ -1164,7 +1164,7 @@
     ctx.fillStyle = '#0d0f14'; ctx.fillRect(0, 0, VW, VH);
     var st = S.state;
     if (st === 'title') {
-      if (!G('title', ctx, S.t)) text('PEABODY AGV RALLY', VW / 2, 60, '#ffe14a', 2, 'center');
+      if (!G('title', ctx, S.t)) text('WARO KART', VW / 2, 60, '#ffe14a', 2, 'center');
       if (Math.floor(S.t * 2) % 2 === 0) text('PRESS ENTER', VW / 2, 150, '#ffffff', 1, 'center');
     } else if (st === 'mode') {
       drawMenuBG();

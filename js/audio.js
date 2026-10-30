@@ -1,4 +1,4 @@
-/* Peabody AGV Rally - audio.js
+/* WaRo Kart - audio.js
  * WebAudio-only chiptune: synthesized SFX, per-player engine hum and a looping tune.
  * Owner: ART agent. Every call is a safe no-op when audio is unavailable, locked or muted.
  */

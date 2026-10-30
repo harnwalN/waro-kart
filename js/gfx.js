@@ -1,4 +1,4 @@
-/* Peabody AGV Rally - gfx.js
+/* WaRo Kart - gfx.js
  * All pixel art, drawn in code: tiles, props, AGVs, UI, bitmap font, minimap, title screen.
  * Owner: ART agent. See CONTRACT.md for the AGV.gfx interface.
  */
@@ -1535,7 +1535,7 @@
   }
 
   function buildTitleLogo() {
-    var big = 'AGV RALLY', small = 'PEABODY';
+    var big = 'WARO KART', small = 'PEABODY';
     var S = 4, s2 = 2;
     var bw = textWidth(big, S), sw = textWidth(small, s2);
     var W = Math.max(bw, sw) + 12, H = 7 * s2 + 7 * S + 18;

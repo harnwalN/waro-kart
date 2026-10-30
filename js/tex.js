@@ -1,4 +1,4 @@
-/* Peabody AGV Rally - tex.js
+/* WaRo Kart - tex.js
  * Procedural pixel-art textures for the pseudo-3D chase-cam view (see CONTRACT.md, "v2").
  * Owner: TEX agent.
  *

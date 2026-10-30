@@ -1,4 +1,4 @@
-// Peabody AGV Rally: map.js
+// WaRo Kart: map.js
 // Tile map of the Peabody warehouse, the three delivery runs, and the shared
 // geometry helpers (doors, mobile racks, areas). See CONTRACT.md.
 //
