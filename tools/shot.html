@@ -54,6 +54,11 @@
     S.cams = [];
     if (q.get('view') === 'top') S.v3dBroken = true;   // view=top forces the top-down fallback
     S.state = 'race'; S.stateT = 5;
+    if (q.get('scene') === 'results') {   // fake a finished race: scene=results&st=3&chef=1
+      humans.forEach(function (r) { r.finished = true; r.finishTime = r.finalTime = 31.25; r.boxes = 4; r.finishOrder = 1; });
+      S.state = 'results'; S.stateT = +(q.get('st') || 3);
+      if (q.get('chef')) S.chefT = S.stateT - 0.5;
+    }
   }
 </script>
 </body>

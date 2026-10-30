@@ -1025,6 +1025,7 @@
   ];
   function go(state) {
     S.state = state; S.stateT = 0;
+    if (state === 'results') S.chefT = null;
     if (state !== 'race' && state !== 'results') { sfxCall('engine', 0, -1); sfxCall('engine', 1, -1); }
   }
   function menuMove(idx, n) {
@@ -1101,6 +1102,7 @@
         else if (S.resultsIdx === 1) { S.race = null; S.best = loadBest(); go('run'); }
         else { S.race = null; go('title'); }
       } else if (hit(K_BACK)) { S.race = null; go('title'); }
+      if (hit(['KeyC']) && S.stateT > 1.65) { S.chefT = S.stateT; sfxCall('play', 'pickup'); }
     }
   }
   function updateColorPick() {
@@ -1679,6 +1681,99 @@
       if (sel) text('>', ox[i] - 8, 156, '#ffe14a');
       text(o, ox[i], 156, sel ? '#ffffff' : '#8a94a6');
     });
+    drawChef(rows);
+  }
+
+  // ----- Easter egg: the chef pops up on the results screen; C lifts his cloche -----
+  var CHEF_PAL = {
+    W: '#f4f4f0', w: '#c8ccd1', S: '#e8b48c', s: '#c98e68', H: '#6b4a2f', K: '#2a2420',
+    R: '#d83a34', r: '#a8262a', T: '#f4f4f0', G: '#dde0e3', L: '#a6d84a', l: '#7fae2e', P: '#3a3f4a'
+  };
+  var CHEF_ART = [
+    '....WWWWWWW.....',
+    '...WWWWWWWWW....',
+    '...WWwWWWWWW....',
+    '...WWWWWWwWW....',
+    '...WWWWWWWWW....',
+    '...WwWWWWwWW....',
+    '...WWWWWWWWW....',
+    '...WWWwWWWWW....',
+    '...WWWWWWWwW....',
+    '...wwwwwwwww....',
+    '...HHHHHHHHH....',
+    '...HSSSSSSSH....',
+    '...SSKSSSKSS....',
+    '...SSSSSSSSS....',
+    '....SSsssSS.....',
+    '.....SSSSS......',
+    '...RRRTTTRRR....',
+    '..RRRLRTRLRRR...',
+    '.RRRRLRRRLRRRR..',
+    '.RRGRLLLLLRRRR..',
+    '.RRGRLLLLLRRRR..',
+    '.RrrLLLLLLLrrR..',
+    '.RR.LLLLLLL.RR..',
+    '.RR.LLLLLLL.RR..',
+    '.Rr.LLLLLLL.rR..',
+    '.SS.LLLLLLL.SS..',
+    '....LLLLLLL.....',
+    '....LLLLLLL.....',
+    '....lLLLLLl.....',
+    '....PPP.PPP.....',
+    '....PPP.PPP.....',
+    '...KKKK.KKKK....'
+  ];
+  function chefLine(rows) {
+    var me = null;
+    rows.forEach(function (r) { if (r.human && r.finished && (!me || r.finalTime < me.finalTime)) me = r; });
+    if (!me) return 'STILL COOKING...';
+    if (me.boxes === MAX_BOXES && rows[0] === me) return "CHEF'S KISS!";
+    if (rows[0] === me) return 'ORDER UP!';
+    if (me.boxes === MAX_BOXES) return 'NOT ONE BOX DROPPED!';
+    if (me.boxes <= 1) return 'WHO DROPPED THE BOXES?';
+    return 'KEEP COOKING!';
+  }
+  function drawChef(rows) {
+    var ctx = S.ctx, t = S.stateT;
+    if (t < 1.2) return;
+    var rise = Math.min(1, (t - 1.2) / 0.45), ease = 1 - (1 - rise) * (1 - rise);
+    var sc = 2, w = 16 * sc, h = CHEF_ART.length * sc;
+    var x = 266, y = Math.round(170 - ease * (h - 6)) + (Math.floor(t * 2) % 2);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(14, 8, 292, 162); ctx.clip();   // peeks up from behind the panel's bottom edge
+    for (var j = 0; j < CHEF_ART.length; j++) {
+      for (var i = 0; i < 16; i++) {
+        var c = CHEF_ART[j][i];
+        if (c === '.') continue;
+        ctx.fillStyle = CHEF_PAL[c];
+        ctx.fillRect(x + i * sc, y + j * sc, sc, sc);
+      }
+    }
+    // silver tray and cloche held in his right hand; C lifts the lid to reveal a white delivery box
+    var lift = S.chefT != null ? Math.max(0, 1.8 - (t - S.chefT)) : 0;
+    var up = lift > 0 ? Math.round(Math.min(1, lift * 4, (1.8 - lift) * 6 + 0.01) * 10) : 0;
+    var tx = x + 22, ty = y + (CHEF_ART.length - 7) * sc;   // tray sits at hand height
+    ctx.fillStyle = '#7d8692'; ctx.fillRect(tx, ty, 22, 2);
+    if (up > 0) {
+      ctx.fillStyle = '#f4f4f0'; ctx.fillRect(tx + 6, ty - 8, 10, 8);
+      ctx.fillStyle = '#23336b'; ctx.fillRect(tx + 13, ty - 8, 2, 8);
+      ctx.fillStyle = '#ffe14a';
+      if (Math.floor(t * 8) % 2) { ctx.fillRect(tx + 3, ty - 12, 1, 1); ctx.fillRect(tx + 19, ty - 10, 1, 1); ctx.fillRect(tx + 11, ty - 15, 1, 1); }
+    }
+    ctx.fillStyle = '#b6bec7'; ctx.fillRect(tx + 3, ty - 7 - up, 16, 7); ctx.fillRect(tx + 5, ty - 9 - up, 12, 2);
+    ctx.fillStyle = '#dde0e3'; ctx.fillRect(tx + 6, ty - 7 - up, 3, 2);
+    ctx.fillStyle = '#7d8692'; ctx.fillRect(tx + 10, ty - 11 - up, 2, 2);
+    ctx.restore();
+    // speech bubble once he's up
+    if (rise >= 1) {
+      var line = lift > 0 ? 'BON APPETIT!' : (t > 6 && Math.floor(t / 3) % 2 ? 'PSST... PRESS C' : chefLine(rows));
+      var bw = textW(line, 1) + 8, bx = Math.min(x - 4, 300) - bw, by = y - 4;
+      ctx.fillStyle = '#f4f4f0'; ctx.fillRect(bx, by, bw, 13);
+      ctx.fillStyle = '#2a2420'; ctx.fillRect(bx, by - 1, bw, 1); ctx.fillRect(bx, by + 13, bw, 1);
+      ctx.fillRect(bx - 1, by, 1, 13); ctx.fillRect(bx + bw, by, 1, 13);
+      ctx.fillStyle = '#f4f4f0'; ctx.fillRect(bx + bw, by + 8, 3, 2);
+      G('text', ctx, line, bx + 4, by + 3, '#2a2420', 1, 'left') || text(line, bx + 4, by + 3, '#2a2420');
+    }
   }
 
   // ----- Boot and main loop -----
