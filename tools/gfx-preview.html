@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AGV Rally gfx preview</title>
+<style>
+  body { margin: 0; padding: 8px; background: #0b0c10; color: #ccc; font: 12px monospace; }
+  canvas { image-rendering: pixelated; display: block; margin: 0 0 8px 0; }
+  #err { color: #ff6060; white-space: pre-wrap; }
+  #info { color: #8a8; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<div id="err"></div>
+<div id="info"></div>
+<script>
+  window.__errs = [];
+  window.onerror = function (msg, src, line, col) {
+    var t = 'ERROR: ' + msg + ' @ ' + (src || '').split('/').pop() + ':' + line + ':' + col;
+    window.__errs.push(t);
+    document.getElementById('err').textContent += t + '\n';
+    console.error('Uncaught ' + t);
+  };
+  window.__forceStub = /[?&]stub=1/.test(location.search);
+</script>
+<script src="../js/map.js"></script>
+<script>
+// Inline stub map (used when js/map.js is missing or ?stub=1). Follows the CONTRACT shapes.
+(function () {
+  if (window.AGV && window.AGV.map && !window.__forceStub) return;
+  var AGV = window.AGV = window.AGV || {};
+  var TILE = AGV.TILE = 16;
+  var T = AGV.T = { FLOOR: 0, SCUFF: 1, VINYL: 2, WALL: 3, RACK: 4, ROOM: 5, DOCKDOOR: 6, WINDOW: 7, OUTSIDE: 8,
+    TAPE: 9, DOCKPLATE: 10, CURB: 11 };
+  var W = 64, H = 46, tiles = new Uint8Array(W * H).fill(T.OUTSIDE);
+  function fill(x0, y0, x1, y1, id) { for (var y = y0; y <= y1; y++) for (var x = x0; x <= x1; x++) tiles[y * W + x] = id; }
+  fill(1, 1, 62, 44, T.WALL);
+  fill(2, 2, 12, 11, T.ROOM);                 // chemical storage
+  fill(14, 3, 61, 10, T.FLOOR);               // main hall
+  for (var x = 16; x < 60; x += 4) { tiles[11 * W + x] = T.WINDOW; tiles[11 * W + x + 1] = T.WINDOW; }
+  fill(2, 13, 20, 43, T.FLOOR);               // dock
+  fill(14, 11, 20, 12, T.FLOOR);
+  for (var y = 16; y < 42; y += 6) { tiles[y * W + 1] = T.DOCKDOOR; tiles[(y + 1) * W + 1] = T.DOCKDOOR;
+    fill(2, y, 3, y + 1, T.DOCKPLATE); }
+  fill(6, 30, 9, 33, T.SCUFF); fill(12, 20, 13, 21, T.SCUFF);
+  fill(4, 24, 18, 24, T.TAPE);
+  fill(22, 12, 38, 26, T.ROOM);               // QI processing
+  fill(22, 28, 40, 43, T.VINYL);              // decon
+  fill(22, 28, 22, 43, T.CURB);
+  fill(42, 12, 61, 43, T.FLOOR);              // stockroom
+  fill(41, 12, 41, 43, T.WALL);
+  fill(44, 14, 45, 41, T.RACK); fill(48, 14, 49, 41, T.RACK); fill(57, 14, 59, 41, T.RACK);
+  fill(42, 11, 47, 11, T.FLOOR);
+  fill(21, 30, 21, 35, T.FLOOR);
+  AGV.isSolid = function (id) { return [T.WALL, T.RACK, T.ROOM, T.DOCKDOOR, T.WINDOW, T.OUTSIDE, T.CURB].indexOf(id) >= 0; };
+  function px(t) { return t * TILE; }
+  var runs = {
+    stockroom: { key: 'stockroom', name: 'STOCKROOM RUN', color: '#e04040',
+      grid: [{ x: 120, y: 600, angle: -Math.PI / 2 }, { x: 160, y: 612, angle: -Math.PI / 2 },
+        { x: 120, y: 650, angle: -Math.PI / 2 }, { x: 160, y: 662, angle: -Math.PI / 2 }],
+      waypoints: [{ x: 280, y: 300, r: 48 }, { x: 280, y: 110, r: 48 }, { x: 600, y: 110, r: 48 },
+        { x: 720, y: 110, r: 48 }, { x: 860, y: 200, r: 48 }, { x: 860, y: 600, r: 48, label: 'STOCKROOM DROP-OFF' }],
+      finish: { x: 800, y: 592, w: 112, h: 16 } }
+  };
+  runs.decon = Object.assign({}, runs.stockroom, { key: 'decon', name: 'DECON RUN', color: '#3a7bff',
+    waypoints: [{ x: 280, y: 300, r: 48 }, { x: 280, y: 110, r: 48 }, { x: 480, y: 600, r: 48 }],
+    finish: { x: 420, y: 592, w: 112, h: 16 } });
+  runs.double = Object.assign({}, runs.stockroom, { key: 'double', name: 'DOUBLE RUN', color: '#c060ff' });
+  AGV.map = {
+    W: W, H: H, tiles: tiles,
+    at: function (tx, ty) { return tx < 0 || ty < 0 || tx >= W || ty >= H ? T.OUTSIDE : tiles[ty * W + tx]; },
+    rooms: [{ name: 'CHEMICAL STORAGE', num: '122', x: 2, y: 2, w: 11, h: 10 },
+      { name: 'QI PROCESSING', num: '119', x: 22, y: 12, w: 17, h: 15 }],
+    areas: [{ name: 'DOCK', x: 2, y: 13, w: 19, h: 31 }],
+    props: [
+      { type: 'bollard', x: 72, y: 250, w: 8, h: 8, solid: true }, { type: 'column', x: 200, y: 400, w: 10, h: 10, solid: true },
+      { type: 'palletjack', x: 260, y: 520, w: 14, h: 28, solid: true }, { type: 'bins', x: 290, y: 260, w: 28, h: 24, solid: true },
+      { type: 'crates', x: 290, y: 300, w: 26, h: 24, solid: true }, { type: 'cart', x: 80, y: 620, w: 22, h: 28, solid: true },
+      { type: 'extinguisher', x: 400, y: 186, w: 6, h: 10 }, { type: 'stairs', x: 260, y: 184, w: 96, h: 24 },
+      { type: 'panel', x: 712, y: 668, w: 10, h: 8 }, { type: 'exitsign', x: 700, y: 178, w: 14, h: 6 },
+      { type: 'cornerguard', x: 664, y: 186, w: 6, h: 6 }],
+    doors: [{ id: 'stockroom', x: 42, y: 11, len: 6, axis: 'h', period: 6, phase: 0 },
+      { id: 'decon', x: 21, y: 30, len: 6, axis: 'v', period: 5.5, phase: 2 }],
+    movers: [{ id: 'rackA', x: 52, y: 20, w: 3, h: 7, dx: 2, dy: 0, period: 6, phase: 0 }],
+    pickups: [{ x: 300, y: 110 }, { x: 860, y: 400 }],
+    runs: runs
+  };
+  AGV.doorOpen = function (d, t) { var u = ((t + d.phase) % d.period) / d.period; return u < 0.25 ? 0 : 1; };
+  AGV.doorLeaves = function (door, f) {
+    var reach = (door.len - 2) * TILE / 2, l = reach * (1 - f), off = 6;
+    var a0 = (door.axis === 'h' ? door.x : door.y) * TILE, a1 = a0 + door.len * TILE;
+    if (door.axis === 'h') return [{ x: a0, y: door.y * TILE + off, w: l, h: 4 }, { x: a1 - l, y: door.y * TILE + off, w: l, h: 4 }];
+    return [{ x: door.x * TILE + off, y: a0, w: 4, h: l }, { x: door.x * TILE + off, y: a1 - l, w: 4, h: l }];
+  };
+  AGV.moverRect = function (m, t) {
+    var u = (((t + m.phase) % m.period) + m.period) % m.period / m.period, f = (1 - Math.cos(u * Math.PI * 2)) / 2;
+    return { x: (m.x + m.dx * f) * TILE, y: (m.y + m.dy * f) * TILE, w: m.w * TILE, h: m.h * TILE };
+  };
+  window.__usingStub = true;
+})();
+</script>
+<script src="../js/gfx.js"></script>
+<script>
+(function () {
+  var S = 3;
+  var q = location.search;
+  var want = (q.match(/[?&]s=([^&]*)/) || [])[1];
+  var T0 = parseFloat((q.match(/[?&]t=([^&]*)/) || [])[1] || '1.3');
+  var sections = want ? want.split(',') : ['sprites', 'ui', 'world1', 'world2'];
+  document.getElementById('info').textContent = (window.__usingStub ? 'STUB map' : 'REAL map') +
+    ' ' + AGV.map.W + 'x' + AGV.map.H + '  sections=' + sections.join(',') + '  t=' + T0;
+
+  var gfx = AGV.gfx;
+  gfx.init();
+  var map = AGV.map;
+
+  function sheet(w, h) {
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.style.width = (w * S) + 'px'; c.style.height = (h * S) + 'px';
+    document.body.appendChild(c);
+    var x = c.getContext('2d');
+    x.imageSmoothingEnabled = false;
+    x.fillStyle = '#101218'; x.fillRect(0, 0, w, h);
+    return x;
+  }
+  function label(x, s, px, py) { gfx.text(x, s, px, py, '#8fa0b0'); }
+
+  var COLORS = ['#e04040', '#3a7bff', '#c060ff', '#3ccf5a'];
+
+  // A world viewport at camera (camX, camY) with everything layered like the engine would.
+  function viewport(x, ox, oy, camX, camY, vw, vh, t, run, extra) {
+    x.save();
+    x.beginPath(); x.rect(ox, oy, vw, vh); x.clip();
+    x.translate(ox, oy);
+    gfx.drawWorld(x, camX, camY, vw, vh, t);
+    if (run) { gfx.drawGuide(x, run, camX, camY, t); gfx.drawFinish(x, run, camX, camY, t); }
+    (map.doors || []).forEach(function (d) {
+      gfx.drawDoor(x, d, AGV.doorOpen ? AGV.doorOpen(d, t) : 1, camX, camY, t);
+    });
+    (map.movers || []).forEach(function (m) { gfx.drawMover(x, m, AGV.moverRect(m, t), camX, camY, t); });
+    (map.pickups || []).forEach(function (p) { gfx.drawPickup(x, p.x - camX, p.y - camY, t); });
+    if (extra) extra(x, camX, camY);
+    x.restore();
+  }
+
+  function worldShots(list) {
+    var x = sheet(330, list.length * 190);
+    list.forEach(function (v, i) {
+      viewport(x, 5, 5 + i * 190, v.cx, v.cy, 320, 180, v.t !== undefined ? v.t : T0, v.run, v.extra);
+      label(x, v.name, 8, 8 + i * 190);
+    });
+  }
+
+  function gridAgvs(run, n) {
+    return function (x, camX, camY) {
+      run.grid.slice(0, n || 4).forEach(function (g, i) {
+        gfx.drawAGV(x, g.x - camX, g.y - camY, g.angle, { color: COLORS[i], boxes: 4, wobble: 0, t: T0,
+          tag: i === 0 ? 'P1' : i === 1 ? 'P2' : '' });
+      });
+    };
+  }
+
+  var R = map.runs;
+  var sr = R.stockroom, dr = R.decon;
+  var g0 = sr.grid[0];
+  var d0 = map.doors[0], d1 = map.doors[1] || map.doors[0];
+  var mv = map.movers[0];
+
+  var SECTIONS = {
+    world1: function () {
+      worldShots([
+        { name: 'DOCK / GRID', cx: g0.x - 160, cy: g0.y - 110, run: sr, extra: gridAgvs(sr) },
+        { name: 'MAIN HALL', cx: sr.waypoints[Math.floor(sr.waypoints.length * 0.3)].x - 160,
+          cy: sr.waypoints[Math.floor(sr.waypoints.length * 0.3)].y - 110, run: sr,
+          extra: function (x, cx, cy) {
+            var w = sr.waypoints[Math.floor(sr.waypoints.length * 0.3)];
+            gfx.drawAGV(x, w.x - cx, w.y - cy, 0, { color: COLORS[0], boxes: 3, boost: true, t: T0, tag: 'P1' });
+            gfx.drawAGV(x, w.x - cx - 50, w.y - cy + 30, 0.2, { color: COLORS[1], boxes: 4, wobble: 1, t: T0 });
+            gfx.drawDrop(x, 'peanuts', w.x - cx + 60, w.y - cy - 20, T0);
+            gfx.drawDrop(x, 'wrap', w.x - cx + 90, w.y - cy + 20, T0);
+            gfx.drawDrop(x, 'box', w.x - cx - 90, w.y - cy - 10, T0);
+          } },
+        { name: 'CORNER / STOCKROOM DOORS', cx: d0.x * 16 + d0.len * 8 - 160, cy: d0.y * 16 - 90, run: sr }
+      ]);
+    },
+    world2: function () {
+      worldShots([
+        { name: 'STOCKROOM MOVER', cx: mv.x * 16 - 120, cy: mv.y * 16 - 40, run: sr, t: 1.5,
+          extra: function (x, cx, cy) {
+            gfx.drawAGV(x, (mv.x - 2) * 16 - cx, (mv.y + 2) * 16 - cy, -Math.PI / 2,
+              { color: COLORS[2], boxes: 2, estop: true, t: 0.2 });
+          } },
+        { name: 'DECON DOORS', cx: d1.x * 16 + d1.len * 8 - 160, cy: d1.y * 16 - 90, run: dr, t: 2.0 },
+        { name: 'STOCKROOM FINISH', cx: sr.finish.x + sr.finish.w / 2 - 160, cy: sr.finish.y - 90, run: sr }
+      ]);
+    },
+    sprites: function () {
+      var x = sheet(460, 590);
+      var y = 4;
+      label(x, 'PROPS', 4, y); y += 10;
+      var props = [
+        { type: 'bollard', w: 8, h: 8 }, { type: 'column', w: 10, h: 10 }, { type: 'palletjack', w: 14, h: 28 },
+        { type: 'bins', w: 28, h: 24 }, { type: 'crates', w: 26, h: 24 }, { type: 'cart', w: 22, h: 28 },
+        { type: 'extinguisher', w: 6, h: 10 }, { type: 'stairs', w: 64, h: 32 }, { type: 'panel', w: 10, h: 8 },
+        { type: 'exitsign', w: 14, h: 6 }, { type: 'exitsign', w: 6, h: 14 }, { type: 'cornerguard', w: 6, h: 16 }
+      ];
+      // draw props onto a fake concrete strip using the world's floor (camera on a plain floor area)
+      x.fillStyle = '#9298a0'; x.fillRect(4, y, 452, 40);
+      var px = 10;
+      props.forEach(function (p) {
+        var q = { type: p.type, w: p.w, h: p.h, x: px + p.w / 2, y: y + 20 };
+        drawPropDirect(x, q);
+        px += p.w + 10;
+      });
+      y += 46;
+
+      label(x, 'AGV: 8 ANGLES x COLOURS, BOXES 4..0', 4, y); y += 12;
+      for (var ci = 0; ci < 4; ci++) {
+        for (var a = 0; a < 8; a++) {
+          var ang = a * Math.PI / 4;
+          x.fillStyle = '#9298a0'; x.fillRect(4 + a * 40, y + ci * 34, 38, 32);
+          gfx.drawAGV(x, 23 + a * 40, y + 16 + ci * 34, ang, { color: COLORS[ci], boxes: 4 - (a % 5), wobble: 0, t: 0 });
+        }
+      }
+      // states
+      var sy = y;
+      var sx = 330;
+      [['ESTOP', { estop: true, t: 0.2 }], ['BOOST', { boost: true, t: 0.5 }], ['WOBBLE', { wobble: 1 }],
+        ['TAG', { tag: 'P2' }]].forEach(function (s, i) {
+        x.fillStyle = '#9298a0'; x.fillRect(sx, sy + i * 34, 120, 32);
+        var o = Object.assign({ color: COLORS[i % 4], boxes: 4, t: 0 }, s[1]);
+        gfx.drawAGV(x, sx + 70, sy + 18 + i * 34, s[0] === 'BOOST' ? 0 : 0.4, o);
+        label(x, s[0], sx + 2, sy + 2 + i * 34);
+      });
+      y += 4 * 34 + 6;
+
+      label(x, 'ITEMS', 4, y); label(x, 'DROPS', 110, y); label(x, 'PICKUP', 210, y); label(x, 'PANEL', 300, y);
+      y += 10;
+      ['boost', 'wrap', 'peanuts', 'box', 'ping'].forEach(function (it, i) {
+        gfx.panel(x, 4 + i * 20, y, 20, 20);
+        gfx.itemIcon(x, it, 6 + i * 20, y + 2);
+      });
+      x.fillStyle = '#9298a0'; x.fillRect(110, y, 90, 26);
+      ['wrap', 'peanuts', 'box'].forEach(function (k, i) { gfx.drawDrop(x, k, 124 + i * 30, y + 13, 0.4); });
+      x.fillStyle = '#9298a0'; x.fillRect(210, y, 80, 26);
+      [0, 0.15, 0.3].forEach(function (t, i) { gfx.drawPickup(x, 224 + i * 26, y + 14, t); });
+      gfx.panel(x, 300, y, 150, 40);
+      gfx.text(x, 'PANEL TEXT 1:23.45', 308, y + 8, gfx.PAL.white);
+      gfx.text(x, 'BOXES x4  #1', 308, y + 20, gfx.PAL.yellow);
+      y += 46;
+
+      label(x, 'DOORS (OPEN 0, 0.5, 1) + MOVER', 4, y); y += 10;
+      [0, 0.5, 1].forEach(function (f, i) {
+        var d = { id: 'p', x: 0, y: 0, len: 6, axis: 'h', period: 6, phase: 0 };
+        var ox = 4 + i * 104, oy = y;
+        x.fillStyle = '#9298a0'; x.fillRect(ox, oy, 100, 24);
+        x.fillStyle = '#c8ccd1'; x.fillRect(ox, oy + 4, 2, 16); x.fillRect(ox + 98, oy + 4, 2, 16);
+        x.save(); x.translate(ox + 2, oy + 4);
+        gfx.drawDoor(x, d, f, 0, 0, 0.1);
+        x.restore();
+      });
+      // vertical door
+      x.fillStyle = '#9298a0'; x.fillRect(320, y, 30, 100);
+      x.save(); x.translate(327, y + 2);
+      gfx.drawDoor(x, { id: 'v', x: 0, y: 0, len: 6, axis: 'v', period: 6, phase: 0 }, 0.3, 0, 0, 0.1);
+      x.restore();
+      x.fillStyle = '#9298a0'; x.fillRect(360, y, 90, 130);
+      var m = { id: 'mv', x: 0, y: 0, w: 3, h: 7, dx: 2, dy: 0, period: 6, phase: 0 };
+      gfx.drawMover(x, m, { x: 0, y: 0, w: 48, h: 112 }, -380, -(y + 8), 0.7);
+      y += 30;
+
+      label(x, 'FONT', 4, y); y += 10;
+      gfx.text(x, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 4, y, gfx.PAL.white);
+      gfx.text(x, "0123456789 .:-!?/'+x,()#% 3x", 4, y + 10, gfx.PAL.yellow);
+      gfx.text(x, 'field svc / pme  women\'s', 4, y + 20, gfx.PAL.steel);
+      gfx.text(x, 'BIG 2X', 4, y + 32, '#e04040', 2);
+      gfx.text(x, 'CENTER', 160, y + 52, '#3a7bff', 1, 'center');
+      gfx.text(x, 'RIGHT', 300, y + 52, '#c060ff', 1, 'right');
+      x.fillStyle = '#333'; x.fillRect(160, y + 50, 1, 12); x.fillRect(300, y + 50, 1, 12);
+      gfx.text(x, 'W=' + gfx.textWidth('HELLO') + ' ' + gfx.textWidth('AB\nABCD', 2), 4, y + 54, gfx.PAL.green);
+      y += 66;
+      label(x, 'PARTICLES', 4, y);
+      var parts = [];
+      for (var i = 0; i < 30; i++) parts.push({ x: 80 + (i * 37 % 60), y: y + 4 + (i * 13 % 16), color: ['#fff', '#f3c22c', '#d9722b'][i % 3], size: 1 + (i % 3), life: 1 });
+      gfx.drawParticles(x, parts, 0, 0);
+    },
+    view: function () {
+      // ?s=view&x=..&y=..&w=..&h=..&z=.. : a single world viewport at camera (x,y), zoom z
+      function num(k, d) { var m = q.match(new RegExp('[?&]' + k + '=([^&]*)')); return m ? parseFloat(m[1]) : d; }
+      var w = num('w', 200), h = num('h', 120), z = num('z', 6);
+      var x = sheet(w, h);
+      x.canvas.style.width = (w * z) + 'px'; x.canvas.style.height = (h * z) + 'px';
+      viewport(x, 0, 0, num('x', 0), num('y', 0), w, h, T0, sr, gridAgvs(sr));
+    },
+    perf: function () {
+      var c = document.createElement('canvas'); c.width = 320; c.height = 180;
+      var x = c.getContext('2d'); x.imageSmoothingEnabled = false;
+      var t0 = performance.now();
+      gfx.init();
+      for (var i = 0; i < 200; i++) gfx.drawWorld(x, 0, 0, 160, 180, 0); // prewarm all chunks
+      var t1 = performance.now();
+      var n = 600;
+      for (i = 0; i < n; i++) {
+        var w = sr.waypoints[i % sr.waypoints.length];
+        gfx.drawWorld(x, w.x - 80, w.y - 90, 160, 180, i / 60);
+        gfx.drawGuide(x, sr, w.x - 80, w.y - 90, i / 60);
+        gfx.drawAGV(x, 80, 90, i * 0.1, { color: COLORS[i % 4], boxes: 4, t: i / 60 });
+      }
+      var t2 = performance.now();
+      document.getElementById('info').textContent += '  PERF prewarm=' + (t1 - t0).toFixed(0) + 'ms  per-view=' +
+        ((t2 - t1) / n).toFixed(3) + 'ms';
+      console.log('PERF ' + document.getElementById('info').textContent);
+    },
+    ui: function () {
+      var x = sheet(460, 400);
+      label(x, 'MINIMAP (STOCKROOM / DECON / DOUBLE)', 4, 4);
+      var dots = sr.grid.map(function (g, i) { return { x: g.x, y: g.y, color: COLORS[i] }; });
+      dots.push({ x: sr.waypoints[8].x, y: sr.waypoints[8].y, color: '#fff' });
+      gfx.panel(x, 4, 14, 100, 100); gfx.minimap(x, 7, 17, 94, 94, sr, dots);
+      gfx.minimap(x, 110, 14, 90, 80, dr, dots);
+      gfx.minimap(x, 206, 14, 64, 60, R.double, dots);
+      label(x, 'TITLE', 4, 120);
+      x.save(); x.translate(4, 130);
+      x.beginPath(); x.rect(0, 0, 320, 180); x.clip();
+      gfx.title(x, 2.2);
+      x.restore();
+      x.save(); x.translate(330, 130); x.beginPath(); x.rect(0, 0, 125, 180); x.clip();
+      gfx.title(x, 0.25);
+      x.restore();
+    }
+  };
+
+  function drawPropDirect(x, p) { gfx.drawProp(x, p, 0, 0); }
+
+  sections.forEach(function (s) { if (SECTIONS[s]) SECTIONS[s](); });
+  // animate with ?anim=1 (not for screenshots)
+  if (/[?&]anim=1/.test(q)) {
+    document.body.innerHTML = '';
+    var c = document.createElement('canvas'); c.width = 320; c.height = 180;
+    c.style.width = '960px'; c.style.height = '540px'; document.body.appendChild(c);
+    var x = c.getContext('2d'); x.imageSmoothingEnabled = false;
+    var t0 = performance.now();
+    (function frame() {
+      var t = (performance.now() - t0) / 1000;
+      if (/title/.test(q)) gfx.title(x, t);
+      else {
+        var w = sr.waypoints, k = (t * 0.5) % (w.length - 1), i = Math.floor(k), f = k - i;
+        var px = w[i].x + (w[i + 1].x - w[i].x) * f, py = w[i].y + (w[i + 1].y - w[i].y) * f;
+        var ang = Math.atan2(w[i + 1].y - w[i].y, w[i + 1].x - w[i].x);
+        viewport(x, 0, 0, Math.round(px - 160), Math.round(py - 90), 320, 180, t, sr, function (x2, cx, cy) {
+          gfx.drawAGV(x2, px - cx, py - cy, ang, { color: '#e04040', boxes: 4, wobble: Math.sin(t * 8), t: t, tag: 'P1' });
+        });
+      }
+      requestAnimationFrame(frame);
+    })();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>AGV Rally audio test</title>
+<style>body{background:#111;color:#ddd;font:14px monospace;padding:12px}button{margin:3px;font:13px monospace}</style>
+</head>
+<body>
+<div id="log"></div>
+<p>Click any button (first click unlocks audio). M toggles mute.</p>
+<div id="btns"></div>
+<p>Engine P1 speed: <input id="spd" type="range" min="-1" max="1" step="0.05" value="-1"></p>
+<script src="../js/audio.js"></script>
+<script>
+  var log = document.getElementById('log');
+  function say(s) { log.textContent += s + '\n'; console.log(s); }
+  window.onerror = function (m) { say('ERROR ' + m); };
+  // Calls before unlock must be harmless.
+  try {
+    ['menu','select','count','go','bump','estop','pickup','boost','drop','ping','boxlost','finish','checkpoint','nope']
+      .forEach(function (n) { AGV.sfx.play(n); });
+    AGV.sfx.engine(0, 0.5); AGV.sfx.engine(1, -1); AGV.sfx.music(true); AGV.sfx.music(false);
+    AGV.sfx.toggleMute(); AGV.sfx.toggleMute();
+    AGV.sfx.unlock(); AGV.sfx.play('go'); AGV.sfx.engine(0, 1); AGV.sfx.engine(0, -1);
+    say('PRE-UNLOCK CALLS OK');
+  } catch (e) { say('THREW ' + e); }
+  var b = document.getElementById('btns');
+  ['menu','select','count','go','bump','estop','pickup','boost','drop','ping','boxlost','finish','checkpoint']
+    .forEach(function (n) {
+      var el = document.createElement('button'); el.textContent = n;
+      el.onclick = function () { AGV.sfx.unlock(); AGV.sfx.play(n); }; b.appendChild(el);
+    });
+  var mb = document.createElement('button'); mb.textContent = 'music on/off';
+  var on = false; mb.onclick = function () { AGV.sfx.unlock(); on = !on; AGV.sfx.music(on); }; b.appendChild(mb);
+  document.getElementById('spd').oninput = function (e) { AGV.sfx.unlock(); AGV.sfx.engine(0, parseFloat(e.target.value)); };
+  if (/auto=1/.test(location.search)) {
+    AGV.sfx.unlock(); AGV.sfx.music(true);
+    var names = ['menu','select','count','go','bump','estop','pickup','boost','drop','ping','boxlost','finish','checkpoint'];
+    names.forEach(function (n, i) { setTimeout(function () { AGV.sfx.play(n); AGV.sfx.engine(0, i / 12); }, i * 100); });
+    setTimeout(function () { AGV.sfx.muted = true; AGV.sfx.play('go'); AGV.sfx.music(false); AGV.sfx.engine(0, -1); say('AUTO OK'); }, 2000);
+  }
+  window.addEventListener('keydown', function (e) { if (e.code === 'KeyM') say('muted=' + AGV.sfx.toggleMute()); });
+</script>
+</body>
+</html>

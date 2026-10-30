@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AGV Rally screenshot harness</title>
+<style>
+  html, body { margin: 0; background: #0d0f14; }
+  canvas { image-rendering: pixelated; display: block; }
+  #err { color: #f66; font: 12px monospace; white-space: pre; position: absolute; top: 0; left: 0; }
+</style>
+</head>
+<body>
+<!-- Dev-only: boots the game and jumps straight into a race scene for headless screenshots.
+     Query params: mode=1p|2p|tt  run=stockroom|decon|double  t=seconds to fast-forward
+     at=tx,ty[;tx,ty]  (teleport human racer(s) to tile coords)  ang=degrees  scene=title|race -->
+<canvas id="screen" width="320" height="180"></canvas>
+<div id="err"></div>
+<script>
+  window.onerror = function (m, s, l) { document.getElementById('err').textContent += m + ' @' + s + ':' + l + '\n'; };
+</script>
+<script src="../js/map.js"></script>
+<script src="../js/gfx.js"></script>
+<script src="../js/audio.js"></script>
+<script src="../js/game.js"></script>
+<script>
+  var q = new URLSearchParams(location.search);
+  var c = document.getElementById('screen');
+  AGV.game.boot(c);
+  if (q.get('scene') !== 'title') {
+    var S = AGV.game._runtime();
+    var mode = q.get('mode') || '1p', run = q.get('run') || 'stockroom';
+    S.mode = mode; S.runKey = run;
+    S.race = AGV.game.createRace(run, mode, { seed: 7, colors: [0, 1] });
+    var humans = S.race.racers.filter(function (r) { return r.human; });
+    var at = (q.get('at') || '').split(';').filter(Boolean);
+    var T = AGV.TILE, ang = q.get('ang');
+    var secs = +(q.get('t') || 0);
+    for (var i = 0; i < secs * 60; i++) {
+      AGV.game.step(S.race, 1 / 60, humans.map(function () { return {}; }));
+    }
+    humans.forEach(function (r, i) {
+      if (at[i]) { var p = at[i].split(','); r.x = +p[0] * T; r.y = +p[1] * T; r.speed = 0; }
+      if (ang != null) r.angle = (+ang) * Math.PI / 180;
+    });
+    S.cams = humans.map(function (r) { return { x: r.x, y: r.y }; });
+    if (!S.cams.length) S.cams = [{ x: S.race.racers[0].x, y: S.race.racers[0].y }];
+    S.state = 'race'; S.stateT = 5;
+  }
+</script>
+</body>
+</html>
